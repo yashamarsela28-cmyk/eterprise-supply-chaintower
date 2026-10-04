@@ -2,12 +2,12 @@ services:
   # 1. Backend REST API Service
   - type: web
     name: control-tower-backend
-    runtime: node
+    runtime: docker
     plan: free
     region: oregon
     rootDir: backend
-    buildCommand: npm ci --omit=dev
-    startCommand: node server.js
+    dockerfilePath: Dockerfile
+    dockerContext: .
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
