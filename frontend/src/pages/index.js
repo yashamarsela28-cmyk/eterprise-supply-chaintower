@@ -1,0 +1,16 @@
+export { DashboardPage } from './DashboardPage';
+export { AnalyticsPage } from './AnalyticsPage';
+export { InventoryPage } from './InventoryPage';
+export { WarehousesPage } from './WarehousesPage';
+export { TransfersPage } from './TransfersPage';
+export { ProductsPage } from './ProductsPage';
+export { SuppliersPage } from './SuppliersPage';
+export { PurchaseOrdersPage } from './PurchaseOrdersPage';
+export { GoodsReceiptsPage } from './GoodsReceiptsPage';
+export { OrdersPage } from './OrdersPage';
+export { ShipmentsPage } from './ShipmentsPage';
+export { CustomersPage } from './CustomersPage';
+export { InvoicesPage } from './InvoicesPage';
+export { PaymentsPage } from './PaymentsPage';
+export { ReturnsPage } from './ReturnsPage';
+export { NotFoundPage } from './NotFoundPage';
