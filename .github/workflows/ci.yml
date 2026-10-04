@@ -110,9 +110,17 @@ jobs:
 
       - name: Verify No Secrets in Source or Git
         run: |
-          echo "Checking for accidental secret commitments..."
-          if git log -p | grep -E "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" ; then
-            echo "CRITICAL: Potential JWT token detected in git log!"
+          echo "Checking for accidental secret commitments in git history and working tree..."
+
+          # Check git commit history excluding the workflow file definition
+          if git log -p -- . ":!.github/workflows/ci.yml" | grep -E "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" ; then
+            echo "CRITICAL: Potential JWT token detected in git history!"
+            exit 1
+          fi
+
+          # Check working tree files excluding the workflow file definition
+          if git grep --untracked -E "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" -- . ":!.github/workflows/ci.yml" ; then
+            echo "CRITICAL: Potential JWT token detected in working tree!"
             exit 1
           fi
 
