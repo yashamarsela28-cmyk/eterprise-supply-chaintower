@@ -3,7 +3,8 @@ import LoadingState from './LoadingState';
 import EmptyState from './EmptyState';
 
 /**
- * Enterprise Data Table Component (Stitch-ready)
+ * Enterprise Data Table Component
+ * High density, crisp borders, sticky header, row hover
  * @param {Array} columns - [{ key, header, render, width, align }]
  * @param {Array} data - Array of row objects
  */
@@ -15,14 +16,15 @@ export function Table({
   emptyTitle = 'No Data',
   onRowClick = null,
   keyExtractor = (item, index) => item.id || item._id || index,
-  className = ''
+  className = '',
+  stickyHeader = false
 }) {
   return (
     <div
       style={{
         width: '100%',
         backgroundColor: 'var(--color-bg-card)',
-        border: '1px solid var(--color-border-subtle)',
+        border: '1px solid var(--color-border-default)',
         borderRadius: 'var(--radius-xl)',
         overflow: 'hidden',
         boxShadow: 'var(--shadow-card)'
@@ -41,7 +43,7 @@ export function Table({
           <thead>
             <tr
               style={{
-                backgroundColor: 'rgba(15, 23, 42, 0.6)',
+                backgroundColor: 'var(--color-bg-secondary)',
                 borderBottom: '1px solid var(--color-border-default)'
               }}
             >
@@ -49,15 +51,18 @@ export function Table({
                 <th
                   key={col.key || idx}
                   style={{
-                    padding: '0.875rem 1rem',
-                    fontSize: 'var(--font-size-xs)',
-                    fontWeight: 600,
-                    color: 'var(--color-text-secondary)',
+                    padding: '0.75rem 1rem',
+                    fontSize: '10.5px',
+                    fontWeight: 700,
+                    color: 'var(--color-text-muted)',
                     textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
+                    letterSpacing: '0.06em',
                     width: col.width || 'auto',
                     textAlign: col.align || 'left',
-                    whiteSpace: 'nowrap'
+                    whiteSpace: 'nowrap',
+                    position: stickyHeader ? 'sticky' : 'static',
+                    top: 0,
+                    zIndex: 1
                   }}
                 >
                   {col.header}
@@ -69,15 +74,15 @@ export function Table({
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={columns.length} style={{ padding: '3rem 1rem' }}>
-                  <LoadingState message="Loading data..." />
+                <td colSpan={columns.length} style={{ padding: '3.5rem 1rem' }}>
+                  <LoadingState message="Loading records..." />
                 </td>
               </tr>
             )}
 
             {!loading && data.length === 0 && (
               <tr>
-                <td colSpan={columns.length} style={{ padding: '3rem 1rem' }}>
+                <td colSpan={columns.length} style={{ padding: '3.5rem 1rem' }}>
                   <EmptyState title={emptyTitle} message={emptyMessage} />
                 </td>
               </tr>
@@ -100,10 +105,10 @@ export function Table({
                       backgroundColor: 'transparent'
                     }}
                     onMouseEnter={(e) => {
-                      if (isClickable) e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
+                      e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
                     }}
                     onMouseLeave={(e) => {
-                      if (isClickable) e.currentTarget.style.backgroundColor = 'transparent';
+                      e.currentTarget.style.backgroundColor = 'transparent';
                     }}
                   >
                     {columns.map((col, colIdx) => {
@@ -114,10 +119,11 @@ export function Table({
                         <td
                           key={col.key || colIdx}
                           style={{
-                            padding: '0.875rem 1rem',
+                            padding: '0.8rem 1rem',
                             color: 'var(--color-text-primary)',
                             textAlign: col.align || 'left',
-                            verticalAlign: 'middle'
+                            verticalAlign: 'middle',
+                            fontSize: 'var(--font-size-xs)'
                           }}
                         >
                           {content}

@@ -16,7 +16,7 @@ export function Skeleton({
         width,
         height,
         borderRadius,
-        backgroundColor: 'rgba(51, 65, 85, 0.4)',
+        backgroundColor: 'var(--color-bg-tertiary)',
         animation: 'pulse 1.5s ease-in-out infinite',
         ...style
       }}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { PackageCheck, RefreshCw, Plus, CheckCircle, Eye } from 'lucide-react';
 import { useApiQuery } from '../hooks/useApiQuery';
 import { usePagination } from '../hooks/usePagination';
@@ -6,6 +6,7 @@ import * as goodsReceiptService from '../services/goodsReceiptService';
 import * as purchaseOrderService from '../services/purchaseOrderService';
 import * as warehouseService from '../services/warehouseService';
 import * as productService from '../services/productService';
+import { normalizeList, normalizePagination } from '../utils/responseNormalizer';
 import { useToast } from '../context/ToastContext';
 import { PageHeader } from '../components/common/PageHeader';
 import { FilterBar } from '../components/common/FilterBar';
@@ -40,11 +41,35 @@ export function GoodsReceiptsPage() {
 
   const { page, limit, setPage, setLimit } = usePagination(1, 20);
 
-  const { data, loading, error, refetch } = useApiQuery(
+  const { data: rawData, loading, error, refetch } = useApiQuery(
     goodsReceiptService.getGoodsReceipts,
     { page, limit, search, status: statusFilter },
     { immediate: true }
   );
+
+  const receipts = useMemo(() => normalizeList(rawData), [rawData]);
+  const pagination = useMemo(() => normalizePagination(rawData, receipts, page, limit), [rawData, receipts, page, limit]);
+
+  // Compute live summary stats
+  const summaryStats = useMemo(() => {
+    let acceptedCount = 0;
+    let totalUnits = 0;
+
+    receipts.forEach((grn) => {
+      const st = (grn.status || 'ACCEPTED').toUpperCase();
+      if (st === 'ACCEPTED' || st === 'COMPLETED') acceptedCount += 1;
+      const items = grn.items || grn.receipt_items || [];
+      items.forEach((it) => {
+        totalUnits += Number(it.quantity_received || it.quantity || 0);
+      });
+    });
+
+    return {
+      total: pagination.total || receipts.length,
+      accepted: acceptedCount,
+      totalUnits
+    };
+  }, [receipts, pagination.total]);
 
   useEffect(() => {
     if (isCreateOpen) {
@@ -53,9 +78,9 @@ export function GoodsReceiptsPage() {
         warehouseService.getWarehouses({ limit: 50 }).catch(() => ({ data: [] })),
         productService.getProducts({ limit: 50 }).catch(() => ({ data: [] }))
       ]).then(([poRes, whRes, prodRes]) => {
-        const pos = poRes?.data || [];
-        const whs = whRes?.data || [];
-        const prods = prodRes?.data || [];
+        const pos = normalizeList(poRes);
+        const whs = normalizeList(whRes);
+        const prods = normalizeList(prodRes);
         setPurchaseOrders(pos);
         setWarehouses(whs);
         setProducts(prods);
@@ -72,9 +97,6 @@ export function GoodsReceiptsPage() {
       });
     }
   }, [isCreateOpen]);
-
-  const receipts = data?.data || [];
-  const pagination = data?.pagination || { total: receipts.length, page, limit, totalPages: Math.ceil(receipts.length / limit) || 1 };
 
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
@@ -141,54 +163,67 @@ export function GoodsReceiptsPage() {
   const columns = [
     {
       key: 'grn_number',
-      header: 'GRN Number',
+      header: 'GRN Identifier',
       render: (r) => (
         <div>
           <div style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
             {r.grn_number || `GRN-${r.grn_id || r.id}`}
           </div>
-          <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-            Received: {formatDate(r.received_date || r.created_at)}
+          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '0.15rem' }}>
+            Received: <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-secondary)' }}>{formatDate(r.received_date || r.created_at)}</span>
           </div>
         </div>
       )
     },
     {
       key: 'po_number',
-      header: 'PO Reference',
-      render: (r) => r.purchase_orders?.po_number || r.po_number || `PO #${r.purchase_order_id}`
+      header: 'Linked PO Ref',
+      render: (r) => (
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
+          {r.purchase_orders?.po_number || r.po_number || `PO #${r.purchase_order_id}`}
+        </span>
+      )
     },
     {
       key: 'warehouse',
-      header: 'Receiving Warehouse',
-      render: (r) => r.warehouses?.name || r.warehouse_name || 'Central Hub'
+      header: 'Receiving Dock Hub',
+      render: (r) => (
+        <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
+          {r.warehouses?.name || r.warehouse_name || 'Central Facility'}
+        </span>
+      )
     },
     {
       key: 'received_by',
-      header: 'Received By Agent',
-      render: (r) => `Staff ID #${r.received_by || 1}`
+      header: 'Dock Officer',
+      render: (r) => (
+        <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
+          Staff #{r.received_by || 1}
+        </span>
+      )
     },
     {
       key: 'status',
-      header: 'Status',
-      render: (r) => <StatusBadge status={r.status || 'ACCEPTED'} />
+      header: 'QA Disposition',
+      render: (r) => <StatusBadge status={r.status || 'ACCEPTED'} size="sm" />
     }
   ];
 
   return (
-    <div className="goods-receipts-page">
+    <div className="goods-receipts-page animate-fade-in">
       <PageHeader
+        eyebrow="RECEIVING // DOCK INTAKE"
         title="Goods Receipts & Inbound Docks"
-        description="Dock receiving notes, physical shipment intake, and QA verification logs."
+        description="Physical dock intake notes, lot / batch verification, QA dispositions, and on-hand inventory absorption."
         actions={
           <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
             <Button
-              variant="secondary"
+              variant="outline"
               size="sm"
               icon={RefreshCw}
               onClick={refetch}
             >
-              Refresh
+              Refresh Docks
             </Button>
             <Button
               variant="primary"
@@ -202,13 +237,71 @@ export function GoodsReceiptsPage() {
         }
       />
 
+      {/* KPI Summary Strip */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gap: 'var(--space-3)',
+          marginBottom: 'var(--space-5)'
+        }}
+      >
+        <div
+          style={{
+            padding: '0.85rem 1.15rem',
+            backgroundColor: 'var(--color-bg-card)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)'
+          }}
+        >
+          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Goods Receipts Issued
+          </span>
+          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
+            {formatNumber(summaryStats.total)}
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: '0.85rem 1.15rem',
+            backgroundColor: 'var(--color-bg-card)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)'
+          }}
+        >
+          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Accepted Shipments
+          </span>
+          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-success-text)', fontFamily: 'var(--font-mono)' }}>
+            {formatNumber(summaryStats.accepted)}
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: '0.85rem 1.15rem',
+            backgroundColor: 'var(--color-bg-card)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)'
+          }}
+        >
+          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Total Ingested Physical Units
+          </span>
+          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
+            {formatNumber(summaryStats.totalUnits)} units
+          </div>
+        </div>
+      </div>
+
       <FilterBar
         search={search}
         onSearchChange={(val) => {
           setSearch(val);
           setPage(1);
         }}
-        searchPlaceholder="Search GRN, PO or warehouse..."
+        searchPlaceholder="Filter by GRN number, PO reference, warehouse..."
         hasActiveFilters={Boolean(search || statusFilter)}
         onReset={() => {
           setSearch('');
@@ -237,6 +330,7 @@ export function GoodsReceiptsPage() {
         loading={loading}
         onRowClick={(grn) => setSelectedGRN(grn)}
         emptyTitle="No Goods Receipts Found"
+        emptyMessage="No dock goods receipt records matched your filter criteria."
       />
 
       <Pagination
@@ -257,44 +351,48 @@ export function GoodsReceiptsPage() {
       >
         {selectedGRN && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-            <div style={{ padding: '1rem', backgroundColor: 'rgba(30, 41, 59, 0.4)', borderRadius: 'var(--radius-lg)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>Status</span>
-                <StatusBadge status={selectedGRN.status || 'ACCEPTED'} />
+            <div style={{ padding: '0.85rem 1rem', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
+                <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>QA Disposition</span>
+                <StatusBadge status={selectedGRN.status || 'ACCEPTED'} size="sm" />
               </div>
-              <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)' }}>
-                <strong>Warehouse Facility:</strong> {selectedGRN.warehouses?.name || 'Central Facility'}
+              <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)', display: 'flex', justifyContent: 'space-between' }}>
+                <span>Receiving Facility:</span>
+                <strong style={{ color: 'var(--color-text-primary)' }}>{selectedGRN.warehouses?.name || 'Central Facility'}</strong>
               </div>
-              <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)', marginTop: '0.25rem' }}>
-                Received on {formatDate(selectedGRN.received_date || selectedGRN.created_at)}
+              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)', marginTop: '0.4rem', borderTop: '1px solid var(--color-border-subtle)', paddingTop: '0.4rem' }}>
+                <strong style={{ color: 'var(--color-text-muted)' }}>Date Ingested:</strong> {formatDate(selectedGRN.received_date || selectedGRN.created_at)}
               </div>
             </div>
 
             {selectedGRN.items && selectedGRN.items.length > 0 && (
               <div>
-                <h4 style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, marginBottom: 'var(--space-2)' }}>Received Dock Items</h4>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <h4 style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>
+                  Ingested Items ({selectedGRN.items.length})
+                </h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                   {selectedGRN.items.map((item, idx) => (
                     <div
                       key={idx}
                       style={{
-                        padding: '0.5rem 0.75rem',
-                        backgroundColor: 'rgba(30, 41, 59, 0.3)',
+                        padding: '0.65rem 0.85rem',
+                        backgroundColor: 'var(--color-bg-secondary)',
                         borderRadius: 'var(--radius-md)',
+                        border: '1px solid var(--color-border-subtle)',
                         display: 'flex',
                         justifyContent: 'space-between',
                         alignItems: 'center'
                       }}
                     >
                       <div>
-                        <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-primary)', fontWeight: 500 }}>
+                        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-primary)', fontWeight: 600 }}>
                           {item.products?.name || item.product_name || `Product #${item.product_id}`}
                         </div>
-                        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-                          Batch: {item.batch_number || 'N/A'} • Condition: {item.condition || 'GOOD'}
+                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                          Batch: <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-secondary)' }}>{item.batch_number || 'N/A'}</span> • Condition: {item.condition || 'GOOD'}
                         </div>
                       </div>
-                      <span style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--color-success)' }}>
+                      <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--color-success-text)' }}>
                         +{item.quantity_received} units
                       </span>
                     </div>
@@ -346,7 +444,7 @@ export function GoodsReceiptsPage() {
             />
 
             <Select
-              label="Receiving Warehouse"
+              label="Receiving Warehouse Facility"
               required
               value={newGRN.warehouse_id}
               onChange={(e) => setNewGRN({ ...newGRN, warehouse_id: e.target.value })}
@@ -382,9 +480,10 @@ export function GoodsReceiptsPage() {
                     gridTemplateColumns: '3fr 1.5fr 2fr auto',
                     gap: 'var(--space-2)',
                     alignItems: 'center',
-                    padding: '0.5rem',
-                    backgroundColor: 'rgba(15, 23, 42, 0.4)',
-                    borderRadius: 'var(--radius-md)'
+                    padding: '0.6rem',
+                    backgroundColor: 'var(--color-bg-secondary)',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--color-border-subtle)'
                   }}
                 >
                   <Select
@@ -415,7 +514,7 @@ export function GoodsReceiptsPage() {
                       type="button"
                       variant="ghost"
                       size="sm"
-                      style={{ color: 'var(--color-danger)' }}
+                      style={{ color: 'var(--color-danger-text)' }}
                       onClick={() => removeItemRow(idx)}
                     >
                       ✕

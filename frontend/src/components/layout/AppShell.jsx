@@ -6,6 +6,7 @@ import Breadcrumbs from './Breadcrumbs';
 
 /**
  * Enterprise Application Shell
+ * Desktop-first, refined padding, maximum workspace utilization
  */
 export function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -25,11 +26,11 @@ export function AppShell() {
       }}
       className="app-shell"
     >
-      {/* Top Header */}
+      {/* Top Navigation Bar */}
       <Header onToggleSidebar={toggleSidebar} isSidebarOpen={sidebarOpen} />
 
-      {/* Main Workspace Layout */}
-      <div style={{ display: 'flex', flex: 1 }}>
+      {/* Main Workspace */}
+      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         {/* Sidebar */}
         <Sidebar isOpen={sidebarOpen} onCloseMobile={() => {}} />
 

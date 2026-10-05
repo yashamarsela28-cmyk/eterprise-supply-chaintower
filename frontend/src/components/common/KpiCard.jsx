@@ -3,7 +3,8 @@ import Card from './Card';
 import Badge from './Badge';
 
 /**
- * Enterprise KPI Metric Card (Stitch-ready)
+ * Enterprise KPI Metric Card
+ * Crisp monospace figures, subtle borders, trend indicators
  */
 export function KpiCard({
   title,
@@ -12,42 +13,47 @@ export function KpiCard({
   icon: Icon,
   trend = null, // { value: '+12%', isPositive: true }
   badge = null, // { text: 'Live', variant: 'success' }
-  color = 'primary', // primary | success | warning | danger | info | purple
+  color = 'primary', // primary | success | warning | danger | info | purple | neutral
   loading = false,
   className = '',
   onClick,
   ...props
 }) {
   const colorMap = {
+    neutral: {
+      bg: 'var(--color-bg-tertiary)',
+      text: 'var(--color-text-secondary)',
+      border: 'var(--color-border-default)'
+    },
     primary: {
-      bg: 'var(--color-primary-subtle)',
-      text: 'var(--color-primary)',
-      border: 'rgba(59, 130, 246, 0.25)'
+      bg: 'rgba(247, 247, 245, 0.05)',
+      text: 'var(--color-text-primary)',
+      border: 'var(--color-border-default)'
     },
     success: {
-      bg: 'var(--color-success-subtle)',
+      bg: 'var(--color-success-bg)',
       text: 'var(--color-success-text)',
-      border: 'rgba(16, 185, 129, 0.25)'
+      border: 'var(--color-success-border)'
     },
     warning: {
-      bg: 'var(--color-warning-subtle)',
+      bg: 'var(--color-warning-bg)',
       text: 'var(--color-warning-text)',
-      border: 'rgba(245, 158, 11, 0.25)'
+      border: 'var(--color-warning-border)'
     },
     danger: {
-      bg: 'var(--color-danger-subtle)',
+      bg: 'var(--color-danger-bg)',
       text: 'var(--color-danger-text)',
-      border: 'rgba(239, 68, 68, 0.25)'
+      border: 'var(--color-danger-border)'
     },
     info: {
-      bg: 'var(--color-info-subtle)',
+      bg: 'var(--color-info-bg)',
       text: 'var(--color-info-text)',
-      border: 'rgba(6, 182, 212, 0.25)'
+      border: 'var(--color-info-border)'
     },
     purple: {
-      bg: 'var(--color-purple-subtle)',
+      bg: 'var(--color-purple-bg)',
       text: 'var(--color-purple-text)',
-      border: 'rgba(139, 92, 246, 0.25)'
+      border: 'var(--color-purple-border)'
     }
   };
 
@@ -59,22 +65,22 @@ export function KpiCard({
       className={`kpi-card ${className}`}
       style={{
         cursor: onClick ? 'pointer' : 'default',
-        transition: 'transform var(--transition-fast), border-color var(--transition-fast)',
+        transition: 'all var(--transition-fast)',
         position: 'relative'
       }}
       onClick={onClick}
       {...props}
     >
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 'var(--space-3)' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.375rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.35rem' }}>
             <span
               style={{
-                fontSize: 'var(--font-size-xs)',
-                fontWeight: 600,
-                color: 'var(--color-text-secondary)',
+                fontSize: '10.5px',
+                fontWeight: 700,
+                color: 'var(--color-text-muted)',
                 textTransform: 'uppercase',
-                letterSpacing: '0.05em'
+                letterSpacing: '0.06em'
               }}
             >
               {title}
@@ -88,26 +94,27 @@ export function KpiCard({
 
           <div
             style={{
-              fontSize: 'var(--font-size-2xl)',
+              fontSize: '1.65rem',
               fontWeight: 700,
               color: 'var(--color-text-primary)',
-              lineHeight: 1.2,
-              fontFamily: 'var(--font-mono)'
+              lineHeight: 1.15,
+              fontFamily: 'var(--font-mono)',
+              letterSpacing: '-0.02em'
             }}
           >
             {loading ? (
               <span
                 style={{
                   display: 'inline-block',
-                  width: '80px',
+                  width: '90px',
                   height: '28px',
-                  backgroundColor: 'var(--color-bg-active)',
+                  backgroundColor: 'var(--color-bg-tertiary)',
                   borderRadius: 'var(--radius-sm)'
                 }}
                 className="animate-pulse"
               />
             ) : (
-              value
+              value ?? '—'
             )}
           </div>
 
@@ -116,9 +123,9 @@ export function KpiCard({
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '0.5rem',
-                marginTop: '0.5rem',
-                fontSize: 'var(--font-size-xs)',
+                gap: '0.4rem',
+                marginTop: '0.45rem',
+                fontSize: '11px',
                 color: 'var(--color-text-muted)'
               }}
             >
@@ -126,7 +133,8 @@ export function KpiCard({
                 <span
                   style={{
                     color: trend.isPositive ? 'var(--color-success-text)' : 'var(--color-danger-text)',
-                    fontWeight: 600
+                    fontWeight: 600,
+                    fontFamily: 'var(--font-mono)'
                   }}
                 >
                   {trend.value}
@@ -140,9 +148,9 @@ export function KpiCard({
         {Icon && (
           <div
             style={{
-              width: '44px',
-              height: '44px',
-              borderRadius: 'var(--radius-lg)',
+              width: '38px',
+              height: '38px',
+              borderRadius: 'var(--radius-md)',
               backgroundColor: scheme.bg,
               color: scheme.text,
               border: `1px solid ${scheme.border}`,
@@ -152,7 +160,7 @@ export function KpiCard({
               flexShrink: 0
             }}
           >
-            <Icon size={22} />
+            <Icon size={18} />
           </div>
         )}
       </div>

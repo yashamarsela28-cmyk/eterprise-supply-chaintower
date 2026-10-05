@@ -8,15 +8,15 @@ export function ProgressBar({
   max = 100,
   label = '',
   showValue = true,
-  valueFormatter = (v) => `${v}%`,
-  height = 8,
+  valueFormatter = (v) => `${v.toFixed(1)}%`,
+  height = 6,
   status = 'default', // 'default', 'success', 'warning', 'danger', 'info'
   thresholds = null // optional { warning: 75, danger: 90 }
 }) {
   const percentage = Math.min(100, Math.max(0, max > 0 ? (value / max) * 100 : 0));
 
   // Determine color based on status or dynamic thresholds
-  let color = 'var(--color-primary)';
+  let color = 'var(--color-text-primary)';
   if (thresholds) {
     if (percentage >= thresholds.danger) color = 'var(--color-danger)';
     else if (percentage >= thresholds.warning) color = 'var(--color-warning)';
@@ -55,10 +55,11 @@ export function ProgressBar({
         style={{
           width: '100%',
           height: `${height}px`,
-          backgroundColor: 'rgba(51, 65, 85, 0.4)',
+          backgroundColor: 'var(--color-bg-tertiary)',
           borderRadius: 'var(--radius-full)',
           overflow: 'hidden',
-          position: 'relative'
+          position: 'relative',
+          border: '1px solid var(--color-border-subtle)'
         }}
       >
         <div

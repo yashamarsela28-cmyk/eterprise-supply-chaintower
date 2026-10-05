@@ -16,7 +16,7 @@ export function Tabs({
         display: 'flex',
         alignItems: 'center',
         gap: variant === 'pills' ? 'var(--space-2)' : 'var(--space-4)',
-        borderBottom: variant === 'underline' ? '1px solid var(--color-border-subtle)' : 'none',
+        borderBottom: variant === 'underline' ? '1px solid var(--color-border-default)' : 'none',
         overflowX: 'auto',
         marginBottom: 'var(--space-4)'
       }}
@@ -37,29 +37,30 @@ export function Tabs({
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.45rem 0.875rem',
+                gap: '0.45rem',
+                padding: '0.4rem 0.8rem',
                 fontSize: 'var(--font-size-xs)',
                 fontWeight: isActive ? 600 : 500,
-                color: isActive ? '#ffffff' : 'var(--color-text-secondary)',
-                backgroundColor: isActive ? 'var(--color-primary)' : 'rgba(30, 41, 59, 0.5)',
-                border: `1px solid ${isActive ? 'transparent' : 'var(--color-border-subtle)'}`,
+                color: isActive ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+                backgroundColor: isActive ? 'var(--color-bg-hover)' : 'var(--color-bg-secondary)',
+                border: `1px solid ${isActive ? 'var(--color-border-strong)' : 'var(--color-border-default)'}`,
                 borderRadius: 'var(--radius-md)',
                 cursor: 'pointer',
                 whiteSpace: 'nowrap',
                 transition: 'all var(--transition-fast)'
               }}
             >
-              {Icon && <Icon size={14} />}
+              {Icon && <Icon size={13} />}
               <span>{tab.label}</span>
               {tab.badge !== undefined && (
                 <span
                   style={{
-                    backgroundColor: isActive ? 'rgba(255,255,255,0.2)' : 'rgba(51,65,85,0.6)',
-                    padding: '0.1rem 0.4rem',
+                    backgroundColor: isActive ? 'rgba(247, 247, 245, 0.15)' : 'rgba(255, 255, 255, 0.06)',
+                    padding: '0.1rem 0.35rem',
                     borderRadius: 'var(--radius-full)',
                     fontSize: '10px',
-                    fontWeight: 600
+                    fontWeight: 700,
+                    fontFamily: 'var(--font-mono)'
                   }}
                 >
                   {tab.badge}
@@ -79,31 +80,33 @@ export function Tabs({
             style={{
               display: 'inline-flex',
               alignItems: 'center',
-              gap: '0.5rem',
-              padding: '0.75rem 0.25rem',
-              fontSize: 'var(--font-size-sm)',
+              gap: '0.45rem',
+              padding: '0.65rem 0.25rem',
+              fontSize: 'var(--font-size-xs)',
               fontWeight: isActive ? 600 : 500,
-              color: isActive ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+              color: isActive ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
               backgroundColor: 'transparent',
               border: 'none',
-              borderBottom: `2px solid ${isActive ? 'var(--color-primary)' : 'transparent'}`,
+              borderBottom: `2px solid ${isActive ? 'var(--color-text-primary)' : 'transparent'}`,
               cursor: 'pointer',
               whiteSpace: 'nowrap',
               marginBottom: '-1px',
               transition: 'all var(--transition-fast)'
             }}
           >
-            {Icon && <Icon size={16} />}
+            {Icon && <Icon size={14} />}
             <span>{tab.label}</span>
             {tab.badge !== undefined && (
               <span
                 style={{
-                  backgroundColor: isActive ? 'rgba(59, 130, 246, 0.2)' : 'rgba(51, 65, 85, 0.4)',
-                  color: isActive ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-                  padding: '0.1rem 0.45rem',
+                  backgroundColor: isActive ? 'var(--color-bg-hover)' : 'var(--color-bg-tertiary)',
+                  color: isActive ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+                  border: '1px solid var(--color-border-default)',
+                  padding: '0.1rem 0.4rem',
                   borderRadius: 'var(--radius-full)',
-                  fontSize: '11px',
-                  fontWeight: 600
+                  fontSize: '10.5px',
+                  fontWeight: 700,
+                  fontFamily: 'var(--font-mono)'
                 }}
               >
                 {tab.badge}

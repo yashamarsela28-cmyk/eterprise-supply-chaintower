@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
+import { Toast } from '../components/common/Toast';
 
 const ToastContext = createContext(null);
 
@@ -45,6 +46,33 @@ export function ToastProvider({ children }) {
   return (
     <ToastContext.Provider value={{ toasts, addToast, removeToast, success, error, warning, info }}>
       {children}
+      {/* Dynamic Toast Viewport */}
+      {toasts.length > 0 && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: 'var(--space-6)',
+            right: 'var(--space-6)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 'var(--space-2)',
+            zIndex: 'var(--z-toast)',
+            pointerEvents: 'none'
+          }}
+        >
+          {toasts.map((toast) => (
+            <div key={toast.id} style={{ pointerEvents: 'auto' }}>
+              <Toast
+                id={toast.id}
+                type={toast.type}
+                title={toast.title}
+                message={toast.message}
+                onDismiss={removeToast}
+              />
+            </div>
+          ))}
+        </div>
+      )}
     </ToastContext.Provider>
   );
 }

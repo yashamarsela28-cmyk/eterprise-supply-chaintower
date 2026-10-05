@@ -1,13 +1,25 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Menu, Bell, ShieldCheck, Search, X, ArrowRight, AlertTriangle, ShoppingCart, Truck, ExternalLink } from 'lucide-react';
+import {
+  Menu,
+  Bell,
+  Search,
+  X,
+  ArrowRight,
+  AlertTriangle,
+  ShoppingCart,
+  Truck,
+  Layers,
+  Activity,
+  Boxes
+} from 'lucide-react';
 import { IconButton } from '../common/IconButton';
 import { Badge } from '../common/Badge';
 import { healthCheck, getDashboardMetrics } from '../../services/dashboardService';
 
 /**
  * Enterprise Application Top Navigation Header
- * Features: Domain Quick Search, Live API Beacon, Real Alerts Popover, User Capsule
+ * Editorial, high-density, real telemetry beacon, instant jump search
  */
 export function Header({ onToggleSidebar, isSidebarOpen }) {
   const navigate = useNavigate();
@@ -22,9 +34,9 @@ export function Header({ onToggleSidebar, isSidebarOpen }) {
 
   // Searchable navigation modules
   const NAV_PAGES = [
-    { title: 'Executive Dashboard', path: '/dashboard', category: 'Control Tower' },
-    { title: 'Analytics & KPIs', path: '/analytics', category: 'Control Tower' },
-    { title: 'Inventory Control', path: '/inventory', category: 'Operations' },
+    { title: 'Control Tower Dashboard', path: '/dashboard', category: 'Overview' },
+    { title: 'Supply Chain Analytics', path: '/analytics', category: 'Overview' },
+    { title: 'Inventory Control', path: '/inventory', category: 'Inventory' },
     { title: 'Sales Orders', path: '/orders', category: 'Operations' },
     { title: 'Shipments & Tracking', path: '/shipments', category: 'Operations' },
     { title: 'Stock Transfers', path: '/transfers', category: 'Operations' },
@@ -35,35 +47,40 @@ export function Header({ onToggleSidebar, isSidebarOpen }) {
     { title: 'Customers Directory', path: '/customers', category: 'Master Data' },
     { title: 'Warehouses & Hubs', path: '/warehouses', category: 'Master Data' },
     { title: 'Invoices & Billing', path: '/invoices', category: 'Finance' },
-    { title: 'Payments & Ledger', path: '/payments', category: 'Finance' },
+    { title: 'Payment Journal', path: '/payments', category: 'Finance' },
     { title: 'Returns & RMA', path: '/returns', category: 'Quality & Returns' }
   ];
 
   const filteredNav = searchQuery.trim()
-    ? NAV_PAGES.filter(p => p.title.toLowerCase().includes(searchQuery.toLowerCase()) || p.category.toLowerCase().includes(searchQuery.toLowerCase()))
+    ? NAV_PAGES.filter(
+        (p) =>
+          p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          p.category.toLowerCase().includes(searchQuery.toLowerCase())
+      )
     : NAV_PAGES;
 
-  // Periodic health check and alert metrics fetch
+  // Real Health & Alert Telemetry
   useEffect(() => {
     let isMounted = true;
     const fetchStatus = async () => {
       try {
         await healthCheck();
         if (isMounted) setApiOnline(true);
-      } catch (err) {
+      } catch {
         if (isMounted) setApiOnline(false);
       }
 
       try {
         const metricsRes = await getDashboardMetrics();
-        if (isMounted && metricsRes?.data) {
+        const data = metricsRes?.data || metricsRes;
+        if (isMounted && data) {
           setAlertsData({
-            lowStock: metricsRes.data.lowStockItemsCount || 0,
-            pendingOrders: metricsRes.data.pendingOrdersCount || 0,
-            inTransit: metricsRes.data.inTransitShipmentsCount || 0
+            lowStock: data.lowStockItemsCount || (Array.isArray(data.lowStockItems) ? data.lowStockItems.length : 0),
+            pendingOrders: data.pendingOrdersCount || 0,
+            inTransit: data.inTransitShipmentsCount || 0
           });
         }
-      } catch (e) {
+      } catch {
         // Fallback silently if metrics fail
       }
     };
@@ -76,7 +93,19 @@ export function Header({ onToggleSidebar, isSidebarOpen }) {
     };
   }, []);
 
-  // Close popovers when clicking outside
+  // Keyboard shortcut '/' to open search
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === '/' && !isSearchOpen && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        setIsSearchOpen(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isSearchOpen]);
+
+  // Click outside handler
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (alertsRef.current && !alertsRef.current.contains(e.target)) {
@@ -90,7 +119,7 @@ export function Header({ onToggleSidebar, isSidebarOpen }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const totalAlertCount = alertsData.lowStock + alertsData.pendingOrders;
+  const totalAlertCount = alertsData.lowStock + alertsData.pendingOrders + alertsData.inTransit;
 
   return (
     <header
@@ -101,90 +130,114 @@ export function Header({ onToggleSidebar, isSidebarOpen }) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '0 var(--space-6)',
+        padding: '0 var(--space-5)',
         position: 'sticky',
         top: 0,
         zIndex: 'var(--z-header)',
-        backdropFilter: 'blur(8px)'
+        backdropFilter: 'blur(12px)'
       }}
     >
-      {/* Brand & Toggle */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)' }}>
+      {/* Left: Brand Identity & Sidebar Toggle */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
         <button
           onClick={onToggleSidebar}
           style={{
-            background: 'none',
+            background: 'transparent',
             border: 'none',
             color: 'var(--color-text-secondary)',
             cursor: 'pointer',
-            padding: '0.35rem',
+            padding: '0.4rem',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             borderRadius: 'var(--radius-md)',
-            transition: 'background var(--transition-fast)'
+            transition: 'background var(--transition-fast), color var(--transition-fast)'
           }}
-          title={isSidebarOpen ? 'Collapse Navigation' : 'Expand Navigation'}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
+            e.currentTarget.style.color = 'var(--color-text-primary)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = 'transparent';
+            e.currentTarget.style.color = 'var(--color-text-secondary)';
+          }}
+          title={isSidebarOpen ? 'Collapse Sidebar' : 'Expand Sidebar'}
         >
-          <Menu size={20} />
+          <Menu size={18} />
         </button>
 
         <div
           onClick={() => navigate('/dashboard')}
-          style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', cursor: 'pointer' }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem',
+            cursor: 'pointer',
+            userSelect: 'none'
+          }}
         >
           <div
             style={{
-              width: '30px',
-              height: '30px',
-              borderRadius: 'var(--radius-md)',
-              backgroundColor: 'var(--color-primary)',
+              width: '28px',
+              height: '28px',
+              borderRadius: 'var(--radius-sm)',
+              backgroundColor: 'var(--color-text-primary)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              color: '#ffffff',
-              fontWeight: 700,
-              fontSize: '14px',
-              boxShadow: '0 0 12px var(--color-primary-glow)'
+              color: 'var(--color-bg-primary)',
+              fontWeight: 800,
+              fontSize: '13px',
+              letterSpacing: '-0.03em'
             }}
           >
             CT
           </div>
-          <span
-            style={{
-              fontWeight: 700,
-              fontSize: 'var(--font-size-base)',
-              color: 'var(--color-text-primary)',
-              letterSpacing: '-0.02em',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem'
-            }}
-          >
-            Supply Chain Control Tower
-          </span>
-          <Badge variant="primary" size="sm">Enterprise</Badge>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <span
+              style={{
+                fontWeight: 600,
+                fontSize: 'var(--font-size-sm)',
+                color: 'var(--color-text-primary)',
+                letterSpacing: '-0.02em',
+                lineHeight: 1.1
+              }}
+            >
+              Control Tower
+            </span>
+            <span
+              style={{
+                fontSize: '10px',
+                color: 'var(--color-text-muted)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.08em',
+                fontWeight: 600
+              }}
+            >
+              Enterprise Supply Chain
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* Center Search / Jump Palette */}
-      <div ref={searchRef} style={{ position: 'relative', width: '360px', maxWidth: '100%' }}>
+      {/* Center: Global Module Jump Search */}
+      <div ref={searchRef} style={{ position: 'relative', width: '380px', maxWidth: '100%' }}>
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
             backgroundColor: 'var(--color-bg-input)',
-            border: `1px solid ${isSearchOpen ? 'var(--color-border-focus)' : 'var(--color-border-default)'}`,
-            borderRadius: 'var(--radius-lg)',
-            padding: '0.35rem 0.75rem',
+            border: `1px solid ${isSearchOpen ? 'var(--color-border-strong)' : 'var(--color-border-default)'}`,
+            borderRadius: 'var(--radius-md)',
+            padding: '0.35rem 0.65rem',
             gap: '0.5rem',
             transition: 'border-color var(--transition-fast)'
           }}
         >
-          <Search size={15} style={{ color: 'var(--color-text-muted)' }} />
+          <Search size={14} style={{ color: 'var(--color-text-muted)' }} />
           <input
             type="text"
-            placeholder="Quick jump to domain or module..."
+            placeholder="Search modules or press '/'..."
             value={searchQuery}
             onChange={(e) => {
               setSearchQuery(e.target.value);
@@ -197,10 +250,11 @@ export function Header({ onToggleSidebar, isSidebarOpen }) {
               outline: 'none',
               color: 'var(--color-text-primary)',
               fontSize: 'var(--font-size-xs)',
-              width: '100%'
+              width: '100%',
+              padding: 0
             }}
           />
-          {searchQuery && (
+          {searchQuery ? (
             <button
               onClick={() => {
                 setSearchQuery('');
@@ -208,31 +262,54 @@ export function Header({ onToggleSidebar, isSidebarOpen }) {
               }}
               style={{ color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center' }}
             >
-              <X size={13} />
+              <X size={12} />
             </button>
+          ) : (
+            <kbd
+              style={{
+                fontSize: '10px',
+                padding: '0.1rem 0.35rem',
+                borderRadius: 'var(--radius-xs)',
+                backgroundColor: 'var(--color-bg-elevated)',
+                border: '1px solid var(--color-border-default)',
+                color: 'var(--color-text-muted)',
+                fontFamily: 'var(--font-mono)'
+              }}
+            >
+              /
+            </kbd>
           )}
         </div>
 
-        {/* Quick Jump Dropdown */}
+        {/* Quick Jump Search Flyout */}
         {isSearchOpen && (
           <div
             style={{
               position: 'absolute',
-              top: 'calc(100% + 4px)',
+              top: 'calc(100% + 6px)',
               left: 0,
               right: 0,
-              backgroundColor: 'var(--color-bg-card)',
-              border: '1px solid var(--color-border-default)',
+              backgroundColor: 'var(--color-bg-secondary)',
+              border: '1px solid var(--color-border-strong)',
               borderRadius: 'var(--radius-lg)',
               boxShadow: 'var(--shadow-lg)',
-              maxHeight: '300px',
+              maxHeight: '320px',
               overflowY: 'auto',
               zIndex: 'var(--z-modal)',
-              padding: '0.5rem'
+              padding: '0.35rem'
             }}
           >
-            <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', padding: '0.25rem 0.5rem', fontWeight: 600, textTransform: 'uppercase' }}>
-              Jump to Module
+            <div
+              style={{
+                fontSize: '10px',
+                color: 'var(--color-text-dim)',
+                padding: '0.35rem 0.5rem',
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.08em'
+              }}
+            >
+              Navigation Jump
             </div>
             {filteredNav.map((page) => (
               <div
@@ -256,7 +333,7 @@ export function Header({ onToggleSidebar, isSidebarOpen }) {
                 onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)')}
                 onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
               >
-                <span>{page.title}</span>
+                <span style={{ fontWeight: 500 }}>{page.title}</span>
                 <span style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>{page.category}</span>
               </div>
             ))}
@@ -264,44 +341,44 @@ export function Header({ onToggleSidebar, isSidebarOpen }) {
         )}
       </div>
 
-      {/* Right Controls: Health Status, Alerts Popover, User Capsule */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)' }}>
-        {/* System Health Badge */}
+      {/* Right: Live Beacon, Alerts Popover, User Capsule */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+        {/* Real API Status Beacon */}
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '0.5rem',
-            padding: '0.25rem 0.65rem',
+            gap: '0.45rem',
+            padding: '0.2rem 0.55rem',
             borderRadius: 'var(--radius-full)',
-            backgroundColor: apiOnline ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-            border: `1px solid ${apiOnline ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
-            fontSize: 'var(--font-size-xs)',
-            color: apiOnline ? 'var(--color-success)' : 'var(--color-danger)'
+            backgroundColor: apiOnline ? 'var(--color-success-bg)' : 'var(--color-danger-bg)',
+            border: `1px solid ${apiOnline ? 'var(--color-success-border)' : 'var(--color-danger-border)'}`,
+            fontSize: '11px',
+            color: apiOnline ? 'var(--color-success-text)' : 'var(--color-danger-text)'
           }}
-          title={apiOnline ? 'Live Express Backend Connected (115/115 Verified)' : 'Backend Service Offline'}
+          title={apiOnline ? 'Live Express Backend Connected' : 'Live Express Backend Offline'}
         >
           <span
             style={{
-              width: '7px',
-              height: '7px',
+              width: '6px',
+              height: '6px',
               borderRadius: '50%',
-              backgroundColor: apiOnline ? 'var(--color-success)' : 'var(--color-danger)',
-              boxShadow: apiOnline ? '0 0 8px var(--color-success)' : 'none'
+              backgroundColor: apiOnline ? 'var(--color-success)' : 'var(--color-danger)'
             }}
+            className={apiOnline ? 'animate-pulse' : ''}
           />
-          <span style={{ fontWeight: 500 }}>{apiOnline ? 'API Online' : 'API Offline'}</span>
+          <span style={{ fontWeight: 600, letterSpacing: '0.04em' }}>{apiOnline ? 'LIVE' : 'OFFLINE'}</span>
         </div>
 
-        {/* Global Notifications / Alerts Popover */}
+        {/* Operational Alerts Popover */}
         <div ref={alertsRef} style={{ position: 'relative' }}>
           <IconButton
             icon={Bell}
             size="sm"
-            variant={isAlertsOpen ? 'primary' : 'ghost'}
+            variant={isAlertsOpen ? 'secondary' : 'ghost'}
             title="Operational Alerts"
             badge={totalAlertCount > 0 ? String(totalAlertCount) : undefined}
-            onClick={() => setIsAlertsOpen(prev => !prev)}
+            onClick={() => setIsAlertsOpen((prev) => !prev)}
           />
 
           {isAlertsOpen && (
@@ -311,33 +388,39 @@ export function Header({ onToggleSidebar, isSidebarOpen }) {
                 top: 'calc(100% + 8px)',
                 right: 0,
                 width: '320px',
-                backgroundColor: 'var(--color-bg-card)',
-                border: '1px solid var(--color-border-default)',
-                borderRadius: 'var(--radius-xl)',
-                boxShadow: 'var(--shadow-card)',
+                backgroundColor: 'var(--color-bg-secondary)',
+                border: '1px solid var(--color-border-strong)',
+                borderRadius: 'var(--radius-lg)',
+                boxShadow: 'var(--shadow-lg)',
                 zIndex: 'var(--z-modal)',
                 overflow: 'hidden'
               }}
             >
               <div
                 style={{
-                  padding: '0.75rem 1rem',
+                  padding: '0.65rem 0.85rem',
                   borderBottom: '1px solid var(--color-border-subtle)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  backgroundColor: 'var(--color-bg-secondary)'
+                  backgroundColor: 'var(--color-bg-tertiary)'
                 }}
               >
-                <span style={{ fontWeight: 600, fontSize: 'var(--font-size-sm)', color: 'var(--color-text-primary)' }}>
-                  Operational Alerts
+                <span style={{ fontWeight: 600, fontSize: 'var(--font-size-xs)', color: 'var(--color-text-primary)' }}>
+                  Operational Telemetry Alerts
                 </span>
-                <Badge variant={totalAlertCount > 0 ? 'warning' : 'success'} size="sm">
+                <span
+                  style={{
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    color: totalAlertCount > 0 ? 'var(--color-warning-text)' : 'var(--color-success-text)'
+                  }}
+                >
                   {totalAlertCount} Active
-                </Badge>
+                </span>
               </div>
 
-              <div style={{ padding: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              <div style={{ padding: '0.4rem', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
                 {alertsData.lowStock > 0 && (
                   <div
                     onClick={() => {
@@ -347,24 +430,24 @@ export function Header({ onToggleSidebar, isSidebarOpen }) {
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '0.75rem',
-                      padding: '0.65rem 0.75rem',
-                      backgroundColor: 'rgba(239, 68, 68, 0.08)',
-                      borderRadius: 'var(--radius-lg)',
-                      border: '1px solid rgba(239, 68, 68, 0.2)',
+                      gap: '0.65rem',
+                      padding: '0.55rem 0.65rem',
+                      backgroundColor: 'var(--color-danger-bg)',
+                      borderRadius: 'var(--radius-md)',
+                      border: '1px solid var(--color-danger-border)',
                       cursor: 'pointer'
                     }}
                   >
-                    <AlertTriangle size={16} style={{ color: 'var(--color-danger)', flexShrink: 0 }} />
+                    <AlertTriangle size={14} style={{ color: 'var(--color-danger-text)', flexShrink: 0 }} />
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+                      <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
                         Low Stock Alert
                       </div>
-                      <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                      <div style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>
                         {alertsData.lowStock} item(s) below reorder threshold
                       </div>
                     </div>
-                    <ArrowRight size={14} style={{ color: 'var(--color-text-muted)' }} />
+                    <ArrowRight size={12} style={{ color: 'var(--color-text-muted)' }} />
                   </div>
                 )}
 
@@ -377,24 +460,24 @@ export function Header({ onToggleSidebar, isSidebarOpen }) {
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '0.75rem',
-                      padding: '0.65rem 0.75rem',
-                      backgroundColor: 'rgba(245, 158, 11, 0.08)',
-                      borderRadius: 'var(--radius-lg)',
-                      border: '1px solid rgba(245, 158, 11, 0.2)',
+                      gap: '0.65rem',
+                      padding: '0.55rem 0.65rem',
+                      backgroundColor: 'var(--color-warning-bg)',
+                      borderRadius: 'var(--radius-md)',
+                      border: '1px solid var(--color-warning-border)',
                       cursor: 'pointer'
                     }}
                   >
-                    <ShoppingCart size={16} style={{ color: 'var(--color-warning)', flexShrink: 0 }} />
+                    <ShoppingCart size={14} style={{ color: 'var(--color-warning-text)', flexShrink: 0 }} />
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+                      <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
                         Pending Fulfillment
                       </div>
-                      <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                      <div style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>
                         {alertsData.pendingOrders} sales orders awaiting action
                       </div>
                     </div>
-                    <ArrowRight size={14} style={{ color: 'var(--color-text-muted)' }} />
+                    <ArrowRight size={12} style={{ color: 'var(--color-text-muted)' }} />
                   </div>
                 )}
 
@@ -407,30 +490,37 @@ export function Header({ onToggleSidebar, isSidebarOpen }) {
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '0.75rem',
-                      padding: '0.65rem 0.75rem',
-                      backgroundColor: 'rgba(6, 182, 212, 0.08)',
-                      borderRadius: 'var(--radius-lg)',
-                      border: '1px solid rgba(6, 182, 212, 0.2)',
+                      gap: '0.65rem',
+                      padding: '0.55rem 0.65rem',
+                      backgroundColor: 'var(--color-info-bg)',
+                      borderRadius: 'var(--radius-md)',
+                      border: '1px solid var(--color-info-border)',
                       cursor: 'pointer'
                     }}
                   >
-                    <Truck size={16} style={{ color: 'var(--color-info)', flexShrink: 0 }} />
+                    <Truck size={14} style={{ color: 'var(--color-info-text)', flexShrink: 0 }} />
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-                        Active Logistics
+                      <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+                        Active Freight
                       </div>
-                      <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                      <div style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>
                         {alertsData.inTransit} carrier shipments in transit
                       </div>
                     </div>
-                    <ArrowRight size={14} style={{ color: 'var(--color-text-muted)' }} />
+                    <ArrowRight size={12} style={{ color: 'var(--color-text-muted)' }} />
                   </div>
                 )}
 
                 {totalAlertCount === 0 && (
-                  <div style={{ padding: '1rem', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)' }}>
-                    No critical operational alerts at this time.
+                  <div
+                    style={{
+                      padding: '1rem',
+                      textAlign: 'center',
+                      color: 'var(--color-text-muted)',
+                      fontSize: '11px'
+                    }}
+                  >
+                    All systems nominal. No active operational alerts.
                   </div>
                 )}
               </div>
@@ -438,42 +528,38 @@ export function Header({ onToggleSidebar, isSidebarOpen }) {
           )}
         </div>
 
-        {/* User profile capsule */}
+        {/* User / Profile Capsule */}
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '0.625rem',
-            padding: '0.25rem 0.65rem 0.25rem 0.25rem',
-            backgroundColor: 'var(--color-bg-card)',
-            border: '1px solid var(--color-border-subtle)',
+            gap: '0.5rem',
+            padding: '0.2rem 0.5rem 0.2rem 0.25rem',
+            backgroundColor: 'var(--color-bg-tertiary)',
+            border: '1px solid var(--color-border-default)',
             borderRadius: 'var(--radius-full)'
           }}
         >
           <div
             style={{
-              width: '28px',
-              height: '28px',
+              width: '24px',
+              height: '24px',
               borderRadius: '50%',
-              backgroundColor: 'var(--color-primary)',
+              backgroundColor: 'var(--color-bg-hover)',
+              border: '1px solid var(--color-border-strong)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              color: '#ffffff',
-              fontSize: 'var(--font-size-xs)',
-              fontWeight: 600
+              color: 'var(--color-text-primary)',
+              fontSize: '10px',
+              fontWeight: 700
             }}
           >
             OP
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-              Supply Chain Officer
-            </span>
-            <span style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>
-              Control Tower Admin
-            </span>
-          </div>
+          <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+            Operations
+          </span>
         </div>
       </div>
     </header>

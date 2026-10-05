@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Truck, RefreshCw, MapPin, Plus, CheckCircle, Navigation, Clock } from 'lucide-react';
 import { useApiQuery } from '../hooks/useApiQuery';
 import { usePagination } from '../hooks/usePagination';
 import * as shipmentService from '../services/shipmentService';
 import * as orderService from '../services/orderService';
+import { normalizeList, normalizePagination } from '../utils/responseNormalizer';
 import { useToast } from '../context/ToastContext';
 import { PageHeader } from '../components/common/PageHeader';
 import { FilterBar } from '../components/common/FilterBar';
@@ -15,7 +16,7 @@ import { Button } from '../components/common/Button';
 import { Drawer } from '../components/common/Drawer';
 import { Modal } from '../components/common/Modal';
 import { StatusBadge } from '../components/common/StatusBadge';
-import { formatDate } from '../utils/formatters';
+import { formatDate, formatNumber } from '../utils/formatters';
 
 export function ShipmentsPage() {
   const toast = useToast();
@@ -53,16 +54,40 @@ export function ShipmentsPage() {
 
   const { page, limit, setPage, setLimit } = usePagination(1, 20);
 
-  const { data, loading, error, refetch } = useApiQuery(
+  const { data: rawData, loading, error, refetch } = useApiQuery(
     shipmentService.getShipments,
     { page, limit, search, status: statusFilter },
     { immediate: true }
   );
 
+  const shipments = useMemo(() => normalizeList(rawData), [rawData]);
+  const pagination = useMemo(() => normalizePagination(rawData, shipments, page, limit), [rawData, shipments, page, limit]);
+
+  // Compute live summary stats
+  const summaryStats = useMemo(() => {
+    let inTransit = 0;
+    let delivered = 0;
+    let outForDelivery = 0;
+
+    shipments.forEach((s) => {
+      const st = (s.status || '').toUpperCase();
+      if (st === 'IN_TRANSIT') inTransit += 1;
+      if (st === 'OUT_FOR_DELIVERY') outForDelivery += 1;
+      if (st === 'DELIVERED') delivered += 1;
+    });
+
+    return {
+      total: pagination.total || shipments.length,
+      inTransit,
+      outForDelivery,
+      delivered
+    };
+  }, [shipments, pagination.total]);
+
   useEffect(() => {
     if (isCreateOpen) {
       orderService.getOrders({ limit: 50 }).then((res) => {
-        const ords = res?.data || [];
+        const ords = normalizeList(res);
         setOrders(ords);
         setNewShipment((prev) => ({
           ...prev,
@@ -80,14 +105,11 @@ export function ShipmentsPage() {
       const shipId = selectedShipment.shipment_id || selectedShipment.id;
       setLoadingTracking(true);
       shipmentService.getShipmentTracking(shipId)
-        .then((res) => setTrackingPoints(res?.data || []))
+        .then((res) => setTrackingPoints(normalizeList(res)))
         .catch(() => setTrackingPoints([]))
         .finally(() => setLoadingTracking(false));
     }
   }, [selectedShipment]);
-
-  const shipments = data?.data || [];
-  const pagination = data?.pagination || { total: shipments.length, page, limit, totalPages: Math.ceil(shipments.length / limit) || 1 };
 
   // Status Change
   const handleStatusChange = async (targetStatus) => {
@@ -97,7 +119,7 @@ export function ShipmentsPage() {
 
     try {
       const res = await shipmentService.updateShipmentStatus(shipId, targetStatus);
-      toast.success(`Shipment updated to ${targetStatus}`);
+      toast.success(`Shipment #${selectedShipment.tracking_number || shipId} updated to ${targetStatus}`);
       setSelectedShipment(res?.data || { ...selectedShipment, status: targetStatus });
       refetch();
     } catch (err) {
@@ -123,7 +145,7 @@ export function ShipmentsPage() {
       };
 
       await shipmentService.addShipmentTracking(shipId, payload);
-      toast.success('Waypoint logged to tracking ledger');
+      toast.success('Waypoint telemetry logged to tracking ledger');
       setIsWaypointModalOpen(false);
 
       // Refresh tracking & shipment
@@ -131,7 +153,7 @@ export function ShipmentsPage() {
         shipmentService.getShipmentTracking(shipId),
         shipmentService.getShipmentById(shipId)
       ]);
-      setTrackingPoints(trackRes?.data || []);
+      setTrackingPoints(normalizeList(trackRes));
       if (shipRes?.data) setSelectedShipment(shipRes.data);
       refetch();
     } catch (err) {
@@ -174,14 +196,16 @@ export function ShipmentsPage() {
   const columns = [
     {
       key: 'tracking_number',
-      header: 'Tracking Number',
+      header: 'Tracking Reference',
       render: (r) => (
         <div>
           <div style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
             {r.tracking_number || `TRK-${r.shipment_id || r.id}`}
           </div>
-          <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-            Carrier: {r.carrier || 'Express Logistics'} • {r.shipping_method || 'STANDARD'}
+          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '0.15rem' }}>
+            Carrier: <span style={{ color: 'var(--color-text-secondary)' }}>{r.carrier || 'Express Logistics'}</span>
+            {' • '}
+            <span>{r.shipping_method || 'STANDARD'}</span>
           </div>
         </div>
       )
@@ -189,46 +213,55 @@ export function ShipmentsPage() {
     {
       key: 'order_number',
       header: 'Sales Order Ref',
-      render: (r) => r.sales_orders?.order_number || r.order_number || `Order #${r.sales_order_id}`
+      render: (r) => (
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
+          {r.sales_orders?.order_number || r.order_number || `Order #${r.sales_order_id}`}
+        </span>
+      )
     },
     {
       key: 'destination',
-      header: 'Destination',
+      header: 'Delivery Destination',
       render: (r) => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: 'var(--font-size-xs)' }}>
-          <MapPin size={12} style={{ color: 'var(--color-text-muted)' }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
+          <MapPin size={12} style={{ opacity: 0.7 }} />
           <span>{r.destination_address || 'Delivery Address'}</span>
         </div>
       )
     },
     {
       key: 'estimated_delivery',
-      header: 'Est. Delivery',
-      render: (r) => formatDate(r.estimated_delivery_date || r.estimated_delivery)
+      header: 'Est. Delivery Date',
+      render: (r) => (
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
+          {formatDate(r.estimated_delivery_date || r.estimated_delivery)}
+        </span>
+      )
     },
     {
       key: 'status',
-      header: 'Logistics Status',
-      render: (r) => <StatusBadge status={r.status} />
+      header: 'Logistics State',
+      render: (r) => <StatusBadge status={r.status} size="sm" />
     }
   ];
 
   const currentStatus = (selectedShipment?.status || '').toUpperCase();
 
   return (
-    <div className="shipments-page">
+    <div className="shipments-page animate-fade-in">
       <PageHeader
+        eyebrow="LOGISTICS // FREIGHT TELEMATICS"
         title="Shipments & Real-Time Logistics"
-        description="Outbound carrier dispatches, route telematics, and final delivery milestones."
+        description="Outbound carrier dispatches, route telematics, carrier performance, and final delivery milestones."
         actions={
           <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
             <Button
-              variant="secondary"
+              variant="outline"
               size="sm"
               icon={RefreshCw}
               onClick={refetch}
             >
-              Refresh
+              Refresh Freight
             </Button>
             <Button
               variant="primary"
@@ -242,13 +275,87 @@ export function ShipmentsPage() {
         }
       />
 
+      {/* KPI Summary Strip */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gap: 'var(--space-3)',
+          marginBottom: 'var(--space-5)'
+        }}
+      >
+        <div
+          style={{
+            padding: '0.85rem 1.15rem',
+            backgroundColor: 'var(--color-bg-card)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)'
+          }}
+        >
+          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Total Outbound Dispatches
+          </span>
+          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
+            {formatNumber(summaryStats.total)}
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: '0.85rem 1.15rem',
+            backgroundColor: 'var(--color-bg-card)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)'
+          }}
+        >
+          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Active In Transit
+          </span>
+          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-info-text)', fontFamily: 'var(--font-mono)' }}>
+            {formatNumber(summaryStats.inTransit)}
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: '0.85rem 1.15rem',
+            backgroundColor: 'var(--color-bg-card)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)'
+          }}
+        >
+          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Out for Delivery
+          </span>
+          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-warning-text)', fontFamily: 'var(--font-mono)' }}>
+            {formatNumber(summaryStats.outForDelivery)}
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: '0.85rem 1.15rem',
+            backgroundColor: 'var(--color-bg-card)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)'
+          }}
+        >
+          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Completed Deliveries
+          </span>
+          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-success-text)', fontFamily: 'var(--font-mono)' }}>
+            {formatNumber(summaryStats.delivered)}
+          </div>
+        </div>
+      </div>
+
       <FilterBar
         search={search}
         onSearchChange={(val) => {
           setSearch(val);
           setPage(1);
         }}
-        searchPlaceholder="Search tracking number or carrier..."
+        searchPlaceholder="Filter by tracking number, carrier, destination..."
         hasActiveFilters={Boolean(search || statusFilter)}
         onReset={() => {
           setSearch('');
@@ -279,6 +386,7 @@ export function ShipmentsPage() {
         loading={loading}
         onRowClick={(s) => setSelectedShipment(s)}
         emptyTitle="No Shipments Found"
+        emptyMessage="No outbound freight shipments matched your filter criteria."
       />
 
       <Pagination
@@ -299,26 +407,27 @@ export function ShipmentsPage() {
       >
         {selectedShipment && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-            <div style={{ padding: '1rem', backgroundColor: 'rgba(30, 41, 59, 0.4)', borderRadius: 'var(--radius-lg)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>Current Status</span>
-                <StatusBadge status={selectedShipment.status} />
+            <div style={{ padding: '0.85rem 1rem', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
+                <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Logistics Status</span>
+                <StatusBadge status={selectedShipment.status} size="sm" />
               </div>
-              <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)' }}>
-                <strong>Method:</strong> {selectedShipment.shipping_method || 'STANDARD'}
+              <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)', display: 'flex', justifyContent: 'space-between' }}>
+                <span>Method:</span>
+                <strong style={{ color: 'var(--color-text-primary)' }}>{selectedShipment.shipping_method || 'STANDARD'}</strong>
               </div>
-              <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)', marginTop: '0.25rem' }}>
-                <strong>Destination:</strong> {selectedShipment.destination_address || 'Delivery Address on file'}
+              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)', marginTop: '0.4rem', borderTop: '1px solid var(--color-border-subtle)', paddingTop: '0.4rem' }}>
+                <strong style={{ color: 'var(--color-text-muted)' }}>Destination:</strong> {selectedShipment.destination_address || 'Delivery Address on file'}
               </div>
-              <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)', marginTop: '0.25rem' }}>
-                <strong>Estimated Arrival:</strong> {formatDate(selectedShipment.estimated_delivery_date || selectedShipment.estimated_delivery)}
+              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)', marginTop: '0.3rem' }}>
+                <strong style={{ color: 'var(--color-text-muted)' }}>Est. Arrival:</strong> {formatDate(selectedShipment.estimated_delivery_date || selectedShipment.estimated_delivery)}
               </div>
             </div>
 
             {/* Operational Actions */}
-            <div style={{ padding: '1rem', backgroundColor: 'rgba(15, 23, 42, 0.6)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
-              <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '0.75rem', textTransform: 'uppercase' }}>
-                Logistics Actions
+            <div style={{ padding: '0.85rem 1rem', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
+              <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--color-text-muted)', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Logistics Dispatch Controls
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
                 {['CREATED', 'PENDING', 'READY'].includes(currentStatus) && (
@@ -329,7 +438,7 @@ export function ShipmentsPage() {
                     loading={actionLoading}
                     onClick={() => handleStatusChange('IN_TRANSIT')}
                   >
-                    Dispatch (In Transit)
+                    Dispatch Freight
                   </Button>
                 )}
 
@@ -369,7 +478,7 @@ export function ShipmentsPage() {
                 )}
 
                 <Button
-                  variant="secondary"
+                  variant="outline"
                   size="sm"
                   icon={Plus}
                   onClick={() => setIsWaypointModalOpen(true)}
@@ -381,32 +490,33 @@ export function ShipmentsPage() {
 
             {/* Tracking History */}
             <div>
-              <h4 style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, marginBottom: 'var(--space-2)' }}>
+              <h4 style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>
                 Carrier Telematics & Waypoints ({trackingPoints.length})
               </h4>
               {loadingTracking ? (
-                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>Loading waypoints...</div>
+                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>Loading waypoint telemetry...</div>
               ) : trackingPoints.length === 0 ? (
-                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', fontStyle: 'italic', padding: '0.5rem 0' }}>
                   No waypoint events logged yet.
                 </div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                   {trackingPoints.map((pt, idx) => (
                     <div
                       key={idx}
                       style={{
-                        padding: '0.5rem 0.75rem',
-                        backgroundColor: 'rgba(30, 41, 59, 0.3)',
+                        padding: '0.65rem 0.85rem',
+                        backgroundColor: 'var(--color-bg-secondary)',
                         borderRadius: 'var(--radius-md)',
-                        borderLeft: '3px solid var(--color-primary)'
+                        border: '1px solid var(--color-border-subtle)',
+                        borderLeft: '3px solid var(--color-info-text)'
                       }}
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text-primary)' }}>
                           {pt.location || pt.checkpoint_name || 'Transit Hub'}
                         </span>
-                        <span style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>
+                        <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
                           {formatDate(pt.timestamp || pt.recorded_at || pt.created_at)}
                         </span>
                       </div>

@@ -4,7 +4,7 @@ import { NAVIGATION_SECTIONS } from '../../routes/navigation';
 
 /**
  * Enterprise Sidebar Navigation Component
- * Control Tower Multi-Echelon Navigation Hierarchy
+ * Editorial, minimalist, grouped multi-echelon hierarchy
  */
 export function Sidebar({ isOpen = true, onCloseMobile }) {
   return (
@@ -22,31 +22,31 @@ export function Sidebar({ isOpen = true, onCloseMobile }) {
         transition: 'width var(--transition-normal)',
         overflowY: 'auto',
         overflowX: 'hidden',
-        zIndex: 'var(--z-header)',
+        zIndex: 'var(--z-sidebar)',
         flexShrink: 0
       }}
       className="app-sidebar"
     >
-      {/* Navigation List */}
-      <div style={{ padding: 'var(--space-4) var(--space-3)' }}>
+      {/* Navigation Sections */}
+      <div style={{ padding: 'var(--space-3) var(--space-2)' }}>
         {NAVIGATION_SECTIONS.map((section, sIdx) => (
-          <div key={sIdx} style={{ marginBottom: 'var(--space-5)' }}>
+          <div key={sIdx} style={{ marginBottom: 'var(--space-4)' }}>
             {isOpen && (
               <div
                 style={{
-                  fontSize: '11px',
+                  fontSize: '10px',
                   fontWeight: 700,
                   textTransform: 'uppercase',
                   letterSpacing: '0.08em',
-                  color: 'var(--color-text-muted)',
-                  padding: '0 var(--space-3) var(--space-2) var(--space-3)'
+                  color: 'var(--color-text-dim)',
+                  padding: '0 var(--space-3) var(--space-1) var(--space-3)'
                 }}
               >
                 {section.title}
               </div>
             )}
 
-            <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+            <nav style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
               {section.items.map((item) => {
                 const Icon = item.icon;
 
@@ -58,14 +58,15 @@ export function Sidebar({ isOpen = true, onCloseMobile }) {
                     style={({ isActive }) => ({
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '0.75rem',
-                      padding: isOpen ? '0.55rem 0.75rem' : '0.55rem',
+                      gap: '0.65rem',
+                      padding: isOpen ? '0.45rem 0.65rem' : '0.45rem',
                       justifyContent: isOpen ? 'flex-start' : 'center',
-                      borderRadius: 'var(--radius-lg)',
-                      fontSize: 'var(--font-size-sm)',
-                      fontWeight: isActive ? 600 : 500,
-                      color: isActive ? '#ffffff' : 'var(--color-text-secondary)',
-                      backgroundColor: isActive ? 'var(--color-primary)' : 'transparent',
+                      borderRadius: 'var(--radius-md)',
+                      fontSize: 'var(--font-size-xs)',
+                      fontWeight: isActive ? 600 : 400,
+                      color: isActive ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+                      backgroundColor: isActive ? 'var(--color-bg-tertiary)' : 'transparent',
+                      borderLeft: isActive ? '2px solid var(--color-text-primary)' : '2px solid transparent',
                       textDecoration: 'none',
                       transition: 'all var(--transition-fast)',
                       position: 'relative'
@@ -74,27 +75,36 @@ export function Sidebar({ isOpen = true, onCloseMobile }) {
                   >
                     {Icon && (
                       <Icon
-                        size={18}
+                        size={15}
                         style={{
-                          flexShrink: 0
+                          flexShrink: 0,
+                          opacity: 0.85
                         }}
                       />
                     )}
                     {isOpen && (
-                      <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <span
+                        style={{
+                          flex: 1,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis'
+                        }}
+                      >
                         {item.title}
                       </span>
                     )}
                     {isOpen && item.badge && (
                       <span
                         style={{
-                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                          color: '#60a5fa',
-                          fontSize: '10px',
+                          backgroundColor: 'var(--color-success-bg)',
+                          color: 'var(--color-success-text)',
+                          border: '1px solid var(--color-success-border)',
+                          fontSize: '9px',
                           fontWeight: 700,
-                          padding: '0.1rem 0.4rem',
+                          padding: '0.05rem 0.35rem',
                           borderRadius: 'var(--radius-full)',
-                          textTransform: 'uppercase'
+                          letterSpacing: '0.04em'
                         }}
                       >
                         {item.badge}
@@ -108,25 +118,25 @@ export function Sidebar({ isOpen = true, onCloseMobile }) {
         ))}
       </div>
 
-      {/* Sidebar Footer */}
+      {/* Sidebar Footer Capsule */}
       {isOpen && (
         <div
           style={{
-            padding: 'var(--space-4)',
+            padding: 'var(--space-3) var(--space-4)',
             borderTop: '1px solid var(--color-border-subtle)',
-            backgroundColor: 'rgba(15, 23, 42, 0.3)',
-            fontSize: 'var(--font-size-xs)',
+            backgroundColor: 'var(--color-bg-primary)',
+            fontSize: '10px',
             color: 'var(--color-text-muted)',
             display: 'flex',
             flexDirection: 'column',
-            gap: '0.25rem'
+            gap: '2px'
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontWeight: 600, color: 'var(--color-text-secondary)' }}>Control Tower Enterprise</span>
-            <span style={{ color: 'var(--color-success)', fontWeight: 500 }}>Live Telemetry</span>
+            <span style={{ fontWeight: 600, color: 'var(--color-text-secondary)' }}>Region: US-EAST-1</span>
+            <span style={{ color: 'var(--color-success-text)', fontWeight: 600 }}>Active</span>
           </div>
-          <span>Multi-Echelon Operational Platform</span>
+          <span style={{ color: 'var(--color-text-dim)' }}>Supply Chain Protocol v2.4</span>
         </div>
       )}
     </aside>

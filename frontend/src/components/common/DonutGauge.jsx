@@ -7,8 +7,8 @@ import React from 'react';
 export function DonutGauge({
   value = 0,
   max = 100,
-  size = 140,
-  strokeWidth = 12,
+  size = 130,
+  strokeWidth = 10,
   label = '',
   sublabel = '',
   status = 'primary' // 'primary', 'success', 'warning', 'danger', 'info'
@@ -18,7 +18,7 @@ export function DonutGauge({
   const circumference = 2 * Math.PI * radius;
   const strokeDashoffset = circumference - (percentage / 100) * circumference;
 
-  let color = 'var(--color-primary)';
+  let color = 'var(--color-text-primary)';
   if (status === 'success') color = 'var(--color-success)';
   else if (status === 'warning') color = 'var(--color-warning)';
   else if (status === 'danger') color = 'var(--color-danger)';
@@ -31,7 +31,7 @@ export function DonutGauge({
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '0.5rem'
+        padding: '0.25rem'
       }}
       className="donut-gauge"
     >
@@ -42,7 +42,7 @@ export function DonutGauge({
             cx={size / 2}
             cy={size / 2}
             r={radius}
-            stroke="rgba(51, 65, 85, 0.4)"
+            stroke="var(--color-bg-tertiary)"
             strokeWidth={strokeWidth}
             fill="transparent"
           />
@@ -75,11 +75,11 @@ export function DonutGauge({
             justifyContent: 'center'
           }}
         >
-          <span style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
+          <span style={{ fontSize: 'var(--font-size-lg)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
             {percentage.toFixed(1)}%
           </span>
           {sublabel && (
-            <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
+            <span style={{ fontSize: '9px', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em' }}>
               {sublabel}
             </span>
           )}
@@ -87,7 +87,7 @@ export function DonutGauge({
       </div>
 
       {label && (
-        <span style={{ marginTop: '0.5rem', fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text-secondary)', textAlign: 'center' }}>
+        <span style={{ marginTop: '0.4rem', fontSize: '11px', fontWeight: 600, color: 'var(--color-text-secondary)', textAlign: 'center' }}>
           {label}
         </span>
       )}

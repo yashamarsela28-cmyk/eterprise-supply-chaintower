@@ -1,8 +1,6 @@
 import React from 'react';
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
-import Button from './Button';
 import IconButton from './IconButton';
-import Select from './Select';
 
 /**
  * Enterprise Pagination Component
@@ -53,10 +51,10 @@ export function Pagination({
         flexWrap: 'wrap',
         gap: 'var(--space-3)',
         padding: 'var(--space-3) var(--space-4)',
-        borderTop: '1px solid var(--color-border-subtle)',
-        fontSize: 'var(--font-size-sm)',
+        borderTop: '1px solid var(--color-border-default)',
+        fontSize: 'var(--font-size-xs)',
         color: 'var(--color-text-secondary)',
-        backgroundColor: 'var(--color-bg-card)',
+        backgroundColor: 'var(--color-bg-secondary)',
         borderBottomLeftRadius: 'var(--radius-xl)',
         borderBottomRightRadius: 'var(--radius-xl)'
       }}
@@ -64,24 +62,25 @@ export function Pagination({
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
         <span>
-          Showing <strong style={{ color: 'var(--color-text-primary)' }}>{startItem}</strong> to{' '}
-          <strong style={{ color: 'var(--color-text-primary)' }}>{endItem}</strong> of{' '}
-          <strong style={{ color: 'var(--color-text-primary)' }}>{totalItems}</strong> entries
+          Showing <strong style={{ color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>{startItem}</strong> to{' '}
+          <strong style={{ color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>{endItem}</strong> of{' '}
+          <strong style={{ color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>{totalItems}</strong> entries
         </span>
 
         {onLimitChange && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', marginLeft: 'var(--space-2)' }}>
-            <span style={{ fontSize: 'var(--font-size-xs)' }}>Per page:</span>
+            <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Per page:</span>
             <select
               value={limit}
               onChange={(e) => onLimitChange(Number(e.target.value))}
               style={{
-                padding: '0.25rem 0.5rem',
+                padding: '0.2rem 0.4rem',
                 backgroundColor: 'var(--color-bg-input)',
                 border: '1px solid var(--color-border-default)',
                 borderRadius: 'var(--radius-sm)',
                 color: 'var(--color-text-primary)',
-                fontSize: 'var(--font-size-xs)',
+                fontSize: '11px',
+                fontFamily: 'var(--font-mono)',
                 outline: 'none',
                 cursor: 'pointer'
               }}
@@ -117,7 +116,7 @@ export function Pagination({
         {getPageNumbers().map((p, idx) => {
           if (p === '...') {
             return (
-              <span key={`ellipsis-${idx}`} style={{ padding: '0 0.5rem', color: 'var(--color-text-muted)' }}>
+              <span key={`ellipsis-${idx}`} style={{ padding: '0 0.4rem', color: 'var(--color-text-dim)' }}>
                 ...
               </span>
             );
@@ -129,18 +128,19 @@ export function Pagination({
               key={p}
               onClick={() => onPageChange(p)}
               style={{
-                minWidth: '2rem',
-                height: '2rem',
-                padding: '0 0.5rem',
+                minWidth: '1.85rem',
+                height: '1.85rem',
+                padding: '0 0.4rem',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                borderRadius: 'var(--radius-md)',
-                fontSize: 'var(--font-size-xs)',
-                fontWeight: isActive ? 600 : 500,
-                backgroundColor: isActive ? 'var(--color-primary)' : 'transparent',
-                color: isActive ? '#ffffff' : 'var(--color-text-secondary)',
-                border: isActive ? 'none' : '1px solid transparent',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: '11px',
+                fontFamily: 'var(--font-mono)',
+                fontWeight: isActive ? 700 : 500,
+                backgroundColor: isActive ? 'var(--color-text-primary)' : 'transparent',
+                color: isActive ? 'var(--color-bg-primary)' : 'var(--color-text-secondary)',
+                border: isActive ? '1px solid var(--color-text-primary)' : '1px solid transparent',
                 cursor: 'pointer',
                 transition: 'all var(--transition-fast)'
               }}

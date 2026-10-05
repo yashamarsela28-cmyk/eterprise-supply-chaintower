@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Receipt, Plus, RefreshCw, DollarSign, Calendar, CheckCircle, XCircle, CreditCard } from 'lucide-react';
 import { useApiQuery } from '../hooks/useApiQuery';
 import { usePagination } from '../hooks/usePagination';
@@ -6,6 +6,7 @@ import * as invoiceService from '../services/invoiceService';
 import * as orderService from '../services/orderService';
 import * as customerService from '../services/customerService';
 import * as paymentService from '../services/paymentService';
+import { normalizeList, normalizePagination } from '../utils/responseNormalizer';
 import { useToast } from '../context/ToastContext';
 import { PageHeader } from '../components/common/PageHeader';
 import { FilterBar } from '../components/common/FilterBar';
@@ -17,7 +18,7 @@ import { Button } from '../components/common/Button';
 import { Drawer } from '../components/common/Drawer';
 import { Modal } from '../components/common/Modal';
 import { StatusBadge } from '../components/common/StatusBadge';
-import { formatCurrency, formatDate } from '../utils/formatters';
+import { formatCurrency, formatDate, formatNumber } from '../utils/formatters';
 
 export function InvoicesPage() {
   const toast = useToast();
@@ -53,11 +54,40 @@ export function InvoicesPage() {
 
   const { page, limit, setPage, setLimit } = usePagination(1, 20);
 
-  const { data, loading, error, refetch } = useApiQuery(
+  const { data: rawData, loading, error, refetch } = useApiQuery(
     invoiceService.getInvoices,
     { page, limit, search, status: statusFilter },
     { immediate: true }
   );
+
+  const invoices = useMemo(() => normalizeList(rawData), [rawData]);
+  const pagination = useMemo(() => normalizePagination(rawData, invoices, page, limit), [rawData, invoices, page, limit]);
+
+  // Compute live summary stats
+  const summaryStats = useMemo(() => {
+    let totalReceivables = 0;
+    let totalSettled = 0;
+    let outstandingCount = 0;
+
+    invoices.forEach((inv) => {
+      const tot = Number(inv.total_amount || 0);
+      const paid = Number(inv.paid_amount || 0);
+      totalReceivables += tot;
+      totalSettled += paid;
+
+      const st = (inv.status || '').toUpperCase();
+      if (st === 'ISSUED' || st === 'PARTIALLY_PAID' || st === 'OVERDUE') {
+        outstandingCount += 1;
+      }
+    });
+
+    return {
+      total: pagination.total || invoices.length,
+      outstanding: outstandingCount,
+      totalReceivables,
+      totalSettled
+    };
+  }, [invoices, pagination.total]);
 
   useEffect(() => {
     if (isCreateOpen) {
@@ -65,8 +95,8 @@ export function InvoicesPage() {
         customerService.getCustomers({ limit: 50 }).catch(() => ({ data: [] })),
         orderService.getOrders({ limit: 50 }).catch(() => ({ data: [] }))
       ]).then(([custRes, ordRes]) => {
-        const custs = custRes?.data || [];
-        const ords = ordRes?.data || [];
+        const custs = normalizeList(custRes);
+        const ords = normalizeList(ordRes);
         setCustomers(custs);
         setOrders(ords);
 
@@ -80,9 +110,6 @@ export function InvoicesPage() {
     }
   }, [isCreateOpen]);
 
-  const invoices = data?.data || [];
-  const pagination = data?.pagination || { total: invoices.length, page, limit, totalPages: Math.ceil(invoices.length / limit) || 1 };
-
   // Status Action Handler
   const handleStatusChange = async (targetStatus) => {
     if (!selectedInvoice) return;
@@ -91,7 +118,7 @@ export function InvoicesPage() {
 
     try {
       const res = await invoiceService.updateInvoiceStatus(invId, targetStatus);
-      toast.success(`Invoice status updated to ${targetStatus}`);
+      toast.success(`Invoice #${selectedInvoice.invoice_number || invId} marked as ${targetStatus}`);
       setSelectedInvoice(res?.data || { ...selectedInvoice, status: targetStatus });
       refetch();
     } catch (err) {
@@ -184,71 +211,80 @@ export function InvoicesPage() {
   const columns = [
     {
       key: 'invoice_number',
-      header: 'Invoice Number',
+      header: 'Invoice Reference',
       render: (r) => (
         <div>
           <div style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
             {r.invoice_number || `INV-${r.invoice_id || r.id}`}
           </div>
-          <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-            Issued: {formatDate(r.invoice_date || r.created_at)}
+          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '0.15rem' }}>
+            Issued: <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-secondary)' }}>{formatDate(r.invoice_date || r.created_at)}</span>
           </div>
         </div>
       )
     },
     {
       key: 'customer',
-      header: 'Billed Customer',
-      render: (r) => r.customers?.name || r.customers?.customer_name || r.customer_name || `Customer #${r.customer_id}`
+      header: 'Billed Customer Entity',
+      render: (r) => (
+        <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-primary)', fontWeight: 500 }}>
+          {r.customers?.name || r.customers?.customer_name || r.customer_name || `Customer #${r.customer_id}`}
+        </span>
+      )
     },
     {
       key: 'due_date',
-      header: 'Due Date',
-      render: (r) => formatDate(r.due_date)
+      header: 'Maturity / Due Date',
+      render: (r) => (
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
+          {formatDate(r.due_date)}
+        </span>
+      )
     },
     {
       key: 'total_amount',
-      header: 'Invoice Total',
+      header: 'Gross Total',
       align: 'right',
       render: (r) => (
-        <span style={{ fontWeight: 600 }}>
+        <span style={{ fontWeight: 600, fontFamily: 'var(--font-mono)', color: 'var(--color-text-primary)' }}>
           {formatCurrency(r.total_amount || 0)}
         </span>
       )
     },
     {
       key: 'paid_amount',
-      header: 'Paid Amount',
+      header: 'Settled Balance',
       align: 'right',
       render: (r) => (
-        <span style={{ color: (r.paid_amount || 0) >= (r.total_amount || 1) ? 'var(--color-success)' : 'var(--color-text-primary)' }}>
+        <span style={{ fontFamily: 'var(--font-mono)', color: (r.paid_amount || 0) >= (r.total_amount || 1) ? 'var(--color-success-text)' : 'var(--color-text-secondary)' }}>
           {formatCurrency(r.paid_amount || 0)}
         </span>
       )
     },
     {
       key: 'status',
-      header: 'Payment Status',
-      render: (r) => <StatusBadge status={r.status || 'DRAFT'} />
+      header: 'Billing State',
+      render: (r) => <StatusBadge status={r.status || 'DRAFT'} size="sm" />
     }
   ];
 
   const currentStatus = (selectedInvoice?.status || '').toUpperCase();
 
   return (
-    <div className="invoices-page">
+    <div className="invoices-page animate-fade-in">
       <PageHeader
+        eyebrow="FINANCE // RECEIVABLES"
         title="Invoices & Commercial Billing"
-        description="Receivables billing, automated invoice generation, and customer payment terms."
+        description="Accounts receivable ledger, automated billing generation, payment maturity, and collection tracking."
         actions={
           <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
             <Button
-              variant="secondary"
+              variant="outline"
               size="sm"
               icon={RefreshCw}
               onClick={refetch}
             >
-              Refresh
+              Refresh Receivables
             </Button>
             <Button
               variant="primary"
@@ -262,13 +298,87 @@ export function InvoicesPage() {
         }
       />
 
+      {/* KPI Summary Strip */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gap: 'var(--space-3)',
+          marginBottom: 'var(--space-5)'
+        }}
+      >
+        <div
+          style={{
+            padding: '0.85rem 1.15rem',
+            backgroundColor: 'var(--color-bg-card)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)'
+          }}
+        >
+          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Invoices Issued
+          </span>
+          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
+            {formatNumber(summaryStats.total)}
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: '0.85rem 1.15rem',
+            backgroundColor: 'var(--color-bg-card)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)'
+          }}
+        >
+          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Outstanding Accounts
+          </span>
+          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-warning-text)', fontFamily: 'var(--font-mono)' }}>
+            {formatNumber(summaryStats.outstanding)}
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: '0.85rem 1.15rem',
+            backgroundColor: 'var(--color-bg-card)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)'
+          }}
+        >
+          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Gross Invoiced Receivables
+          </span>
+          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
+            {formatCurrency(summaryStats.totalReceivables)}
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: '0.85rem 1.15rem',
+            backgroundColor: 'var(--color-bg-card)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)'
+          }}
+        >
+          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Cash Collected
+          </span>
+          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-success-text)', fontFamily: 'var(--font-mono)' }}>
+            {formatCurrency(summaryStats.totalSettled)}
+          </div>
+        </div>
+      </div>
+
       <FilterBar
         search={search}
         onSearchChange={(val) => {
           setSearch(val);
           setPage(1);
         }}
-        searchPlaceholder="Search invoice number or customer..."
+        searchPlaceholder="Filter by invoice number, customer entity..."
         hasActiveFilters={Boolean(search || statusFilter)}
         onReset={() => {
           setSearch('');
@@ -300,6 +410,7 @@ export function InvoicesPage() {
         loading={loading}
         onRowClick={(inv) => setSelectedInvoice(inv)}
         emptyTitle="No Invoices Found"
+        emptyMessage="No commercial billing invoices matched your filter criteria."
       />
 
       <Pagination
@@ -320,33 +431,37 @@ export function InvoicesPage() {
       >
         {selectedInvoice && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-            <div style={{ padding: '1rem', backgroundColor: 'rgba(30, 41, 59, 0.4)', borderRadius: 'var(--radius-lg)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>Status</span>
-                <StatusBadge status={selectedInvoice.status || 'DRAFT'} />
+            <div style={{ padding: '0.85rem 1rem', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
+                <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Billing Status</span>
+                <StatusBadge status={selectedInvoice.status || 'DRAFT'} size="sm" />
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.5rem' }}>
-                <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)' }}>
-                  <strong>Subtotal:</strong> {formatCurrency(selectedInvoice.subtotal || 0)}
+                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
+                  <span style={{ color: 'var(--color-text-muted)' }}>Subtotal:</span>{' '}
+                  <strong style={{ color: 'var(--color-text-primary)' }}>{formatCurrency(selectedInvoice.subtotal || 0)}</strong>
                 </div>
-                <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)' }}>
-                  <strong>Tax:</strong> {formatCurrency(selectedInvoice.tax_amount || 0)}
+                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
+                  <span style={{ color: 'var(--color-text-muted)' }}>Tax:</span>{' '}
+                  <strong style={{ color: 'var(--color-text-primary)' }}>{formatCurrency(selectedInvoice.tax_amount || 0)}</strong>
                 </div>
-                <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)' }}>
-                  <strong>Total:</strong> {formatCurrency(selectedInvoice.total_amount || 0)}
+                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
+                  <span style={{ color: 'var(--color-text-muted)' }}>Total:</span>{' '}
+                  <strong style={{ color: 'var(--color-text-primary)' }}>{formatCurrency(selectedInvoice.total_amount || 0)}</strong>
                 </div>
-                <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-success)', fontWeight: 600 }}>
-                  <strong>Paid:</strong> {formatCurrency(selectedInvoice.paid_amount || 0)}
+                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-success-text)', fontWeight: 600 }}>
+                  <span style={{ color: 'var(--color-text-muted)' }}>Paid:</span>{' '}
+                  {formatCurrency(selectedInvoice.paid_amount || 0)}
                 </div>
               </div>
-              <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)', marginTop: '0.5rem' }}>
-                <strong>Due Date:</strong> {formatDate(selectedInvoice.due_date)}
+              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)', marginTop: '0.5rem', borderTop: '1px solid var(--color-border-subtle)', paddingTop: '0.4rem' }}>
+                <strong style={{ color: 'var(--color-text-muted)' }}>Due Date:</strong> {formatDate(selectedInvoice.due_date)}
               </div>
             </div>
 
             {/* Billing Operational Actions */}
-            <div style={{ padding: '1rem', backgroundColor: 'rgba(15, 23, 42, 0.6)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
-              <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '0.75rem', textTransform: 'uppercase' }}>
+            <div style={{ padding: '0.85rem 1rem', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
+              <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--color-text-muted)', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                 Billing Operations
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
@@ -396,7 +511,7 @@ export function InvoicesPage() {
                 )}
 
                 {currentStatus === 'PAID' && (
-                  <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-success)', fontWeight: 600 }}>
+                  <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-success-text)', fontWeight: 600 }}>
                     ✓ Invoice is fully settled and paid in full.
                   </div>
                 )}

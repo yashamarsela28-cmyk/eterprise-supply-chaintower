@@ -1,7 +1,8 @@
 import React from 'react';
 
 /**
- * Generic Badge Component
+ * Enterprise Badge Component
+ * Muted, understated semantic tags with clean borders
  */
 export function Badge({
   children,
@@ -9,69 +10,75 @@ export function Badge({
   size = 'md', // sm | md
   icon: Icon,
   className = '',
+  style = {},
   ...props
 }) {
   const variantStyles = {
     neutral: {
-      backgroundColor: 'var(--color-bg-active)',
+      backgroundColor: 'var(--color-bg-tertiary)',
       color: 'var(--color-text-secondary)',
-      borderColor: 'var(--color-border-subtle)'
+      borderColor: 'var(--color-border-default)'
     },
     primary: {
-      backgroundColor: 'var(--color-primary-subtle)',
-      color: 'var(--color-primary)',
-      borderColor: 'rgba(59, 130, 246, 0.2)'
+      backgroundColor: 'rgba(247, 247, 245, 0.08)',
+      color: 'var(--color-text-primary)',
+      borderColor: 'var(--color-border-strong)'
     },
     success: {
-      backgroundColor: 'var(--color-success-subtle)',
+      backgroundColor: 'var(--color-success-bg)',
       color: 'var(--color-success-text)',
-      borderColor: 'rgba(16, 185, 129, 0.2)'
+      borderColor: 'var(--color-success-border)'
     },
     warning: {
-      backgroundColor: 'var(--color-warning-subtle)',
+      backgroundColor: 'var(--color-warning-bg)',
       color: 'var(--color-warning-text)',
-      borderColor: 'rgba(245, 158, 11, 0.2)'
+      borderColor: 'var(--color-warning-border)'
     },
     danger: {
-      backgroundColor: 'var(--color-danger-subtle)',
+      backgroundColor: 'var(--color-danger-bg)',
       color: 'var(--color-danger-text)',
-      borderColor: 'rgba(239, 68, 68, 0.2)'
+      borderColor: 'var(--color-danger-border)'
     },
     info: {
-      backgroundColor: 'var(--color-info-subtle)',
+      backgroundColor: 'var(--color-info-bg)',
       color: 'var(--color-info-text)',
-      borderColor: 'rgba(6, 182, 212, 0.2)'
+      borderColor: 'var(--color-info-border)'
     },
     purple: {
-      backgroundColor: 'var(--color-purple-subtle)',
+      backgroundColor: 'var(--color-purple-bg)',
       color: 'var(--color-purple-text)',
-      borderColor: 'rgba(139, 92, 246, 0.2)'
+      borderColor: 'var(--color-purple-border)'
     }
   };
 
   const sizeStyles = {
-    sm: { padding: '0.125rem 0.375rem', fontSize: '11px', iconSize: 10 },
-    md: { padding: '0.25rem 0.625rem', fontSize: 'var(--font-size-xs)', iconSize: 12 }
+    sm: { padding: '0.1rem 0.35rem', fontSize: '10px', iconSize: 10 },
+    md: { padding: '0.15rem 0.5rem', fontSize: '11px', iconSize: 12 }
   };
+
+  const currentSize = sizeStyles[size] || sizeStyles.md;
+  const currentVariant = variantStyles[variant] || variantStyles.neutral;
 
   return (
     <span
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        gap: '0.375rem',
+        gap: '0.3rem',
         fontWeight: 600,
         borderRadius: 'var(--radius-full)',
         border: '1px solid',
         lineHeight: 1.2,
         userSelect: 'none',
-        ...sizeStyles[size],
-        ...variantStyles[variant]
+        letterSpacing: '0.02em',
+        ...currentSize,
+        ...currentVariant,
+        ...style
       }}
       className={`badge badge-${variant} ${className}`}
       {...props}
     >
-      {Icon && <Icon size={sizeStyles[size].iconSize} />}
+      {Icon && <Icon size={currentSize.iconSize} />}
       <span>{children}</span>
     </span>
   );

@@ -1,78 +1,127 @@
 import React from 'react';
 
 /**
- * Reusable Icon Button
+ * Enterprise Icon Button
  */
 export function IconButton({
   icon: Icon,
-  variant = 'ghost', // ghost | secondary | outline | primary | danger
   size = 'md', // sm | md | lg
-  title,
-  ariaLabel,
+  variant = 'ghost', // ghost | secondary | primary | outline
+  badge = null,
   disabled = false,
+  loading = false,
   onClick,
+  title,
   className = '',
+  style = {},
   ...props
 }) {
-  const sizeStyles = {
-    sm: { width: '28px', height: '28px', iconSize: 14 },
-    md: { width: '36px', height: '36px', iconSize: 18 },
-    lg: { width: '44px', height: '44px', iconSize: 22 }
+  const sizeMap = {
+    sm: { buttonSize: '28px', iconSize: 14 },
+    md: { buttonSize: '32px', iconSize: 16 },
+    lg: { buttonSize: '38px', iconSize: 18 }
   };
 
   const variantStyles = {
     ghost: {
       backgroundColor: 'transparent',
       color: 'var(--color-text-secondary)',
-      border: 'none'
+      borderColor: 'transparent'
     },
     secondary: {
-      backgroundColor: 'var(--color-bg-active)',
+      backgroundColor: 'var(--color-bg-tertiary)',
       color: 'var(--color-text-primary)',
-      border: '1px solid var(--color-border-subtle)'
+      borderColor: 'var(--color-border-default)'
+    },
+    primary: {
+      backgroundColor: 'var(--color-text-primary)',
+      color: 'var(--color-bg-primary)',
+      borderColor: 'var(--color-text-primary)'
     },
     outline: {
       backgroundColor: 'transparent',
       color: 'var(--color-text-secondary)',
-      border: '1px solid var(--color-border-default)'
-    },
-    primary: {
-      backgroundColor: 'var(--color-primary)',
-      color: '#ffffff',
-      border: 'none'
-    },
-    danger: {
-      backgroundColor: 'var(--color-danger-subtle)',
-      color: 'var(--color-danger-text)',
-      border: '1px solid var(--color-danger-subtle)'
+      borderColor: 'var(--color-border-default)'
     }
   };
 
-  const { width, height, iconSize } = sizeStyles[size] || sizeStyles.md;
+  const { buttonSize, iconSize } = sizeMap[size] || sizeMap.md;
+  const currentVariant = variantStyles[variant] || variantStyles.ghost;
 
   return (
     <button
       type="button"
-      title={title || ariaLabel}
-      aria-label={ariaLabel || title}
-      disabled={disabled}
+      disabled={disabled || loading}
       onClick={onClick}
+      title={title}
       style={{
+        width: buttonSize,
+        height: buttonSize,
+        borderRadius: 'var(--radius-md)',
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        width,
-        height,
-        borderRadius: 'var(--radius-md)',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.5 : 1,
+        cursor: disabled || loading ? 'not-allowed' : 'pointer',
+        opacity: disabled || loading ? 0.5 : 1,
+        border: '1px solid',
+        position: 'relative',
         transition: 'all var(--transition-fast)',
-        ...variantStyles[variant]
+        ...currentVariant,
+        ...style
       }}
       className={`icon-btn ${className}`}
+      onMouseEnter={(e) => {
+        if (!disabled && !loading && variant === 'ghost') {
+          e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
+          e.currentTarget.style.color = 'var(--color-text-primary)';
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!disabled && !loading && variant === 'ghost') {
+          e.currentTarget.style.backgroundColor = 'transparent';
+          e.currentTarget.style.color = 'var(--color-text-secondary)';
+        }
+      }}
       {...props}
     >
-      {Icon && <Icon size={iconSize} />}
+      {loading ? (
+        <span
+          style={{
+            width: '12px',
+            height: '12px',
+            border: '2px solid currentColor',
+            borderRightColor: 'transparent',
+            borderRadius: '50%'
+          }}
+          className="animate-spin"
+        />
+      ) : (
+        Icon && <Icon size={iconSize} />
+      )}
+
+      {badge && (
+        <span
+          style={{
+            position: 'absolute',
+            top: '-2px',
+            right: '-2px',
+            minWidth: '14px',
+            height: '14px',
+            borderRadius: 'var(--radius-full)',
+            backgroundColor: 'var(--color-warning)',
+            color: '#000000',
+            fontSize: '9px',
+            fontWeight: 800,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '0 2px',
+            lineHeight: 1
+          }}
+        >
+          {badge}
+        </span>
+      )}
     </button>
   );
 }

@@ -3,7 +3,7 @@ import Badge from './Badge';
 import { getStatusVariant, formatStatusLabel } from '../../utils/formatters';
 
 /**
- * Status Badge Component with automatic variant mapping
+ * Status Badge Component with automatic variant mapping and micro-dot
  */
 export function StatusBadge({
   status,
@@ -13,7 +13,7 @@ export function StatusBadge({
   className = '',
   ...props
 }) {
-  if (!status) return <span className="text-subtle">—</span>;
+  if (!status) return <span className="text-dim">—</span>;
 
   const variant = getStatusVariant(status);
   const label = customLabel || formatStatusLabel(status);
@@ -23,15 +23,16 @@ export function StatusBadge({
       {showDot && (
         <span
           style={{
-            width: '6px',
-            height: '6px',
+            width: '5px',
+            height: '5px',
             borderRadius: '50%',
             backgroundColor: 'currentColor',
-            display: 'inline-block'
+            display: 'inline-block',
+            opacity: 0.9
           }}
         />
       )}
-      {label}
+      <span>{label}</span>
     </Badge>
   );
 }

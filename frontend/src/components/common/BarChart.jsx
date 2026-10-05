@@ -11,7 +11,7 @@ export function BarChart({
   valueFormatter = (v) => String(v),
   orientation = 'horizontal', // 'horizontal' | 'vertical'
   height = 240,
-  barColor = 'var(--color-primary)',
+  barColor = 'var(--color-border-strong)',
   highlightMax = false,
   emptyMessage = 'No chart data available.'
 }) {
@@ -40,13 +40,13 @@ export function BarChart({
     return (
       <div style={{ width: '100%', height: `${height}px`, display: 'flex', flexDirection: 'column' }}>
         {/* Tooltip display */}
-        <div style={{ minHeight: '20px', marginBottom: '0.5rem', textAlign: 'right' }}>
+        <div style={{ minHeight: '20px', marginBottom: '0.4rem', textAlign: 'right' }}>
           {hoveredItem ? (
-            <span style={{ fontSize: '11px', color: 'var(--color-primary)', fontWeight: 600 }}>
+            <span style={{ fontSize: '11px', color: 'var(--color-text-primary)', fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
               {hoveredItem[labelKey]}: {valueFormatter(hoveredItem[valueKey])}
             </span>
           ) : (
-            <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Hover a bar to inspect</span>
+            <span style={{ fontSize: '11px', color: 'var(--color-text-dim)' }}>Hover to inspect</span>
           )}
         </div>
 
@@ -57,7 +57,7 @@ export function BarChart({
             display: 'flex',
             alignItems: 'flex-end',
             gap: '0.5rem',
-            borderBottom: '1px solid var(--color-border-subtle)',
+            borderBottom: '1px solid var(--color-border-default)',
             paddingBottom: '0.5rem'
           }}
         >
@@ -85,12 +85,12 @@ export function BarChart({
                 <div
                   style={{
                     width: '100%',
-                    maxWidth: '40px',
+                    maxWidth: '42px',
                     height: `${pct}%`,
-                    backgroundColor: isMax ? 'var(--color-success)' : isHovered ? 'var(--color-primary-hover)' : barColor,
+                    backgroundColor: isMax ? 'var(--color-success)' : isHovered ? 'var(--color-text-primary)' : barColor,
                     borderRadius: 'var(--radius-sm) var(--radius-sm) 0 0',
                     transition: 'all var(--transition-fast)',
-                    opacity: hoveredItem && !isHovered ? 0.5 : 1
+                    opacity: hoveredItem && !isHovered ? 0.4 : 1
                   }}
                 />
               </div>
@@ -99,14 +99,14 @@ export function BarChart({
         </div>
 
         {/* X-Axis Labels */}
-        <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.35rem' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.4rem' }}>
           {data.map((item, idx) => (
             <div
               key={idx}
               style={{
                 flex: 1,
                 textAlign: 'center',
-                fontSize: '10px',
+                fontSize: '10.5px',
                 color: hoveredItem === item ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
                 fontWeight: hoveredItem === item ? 600 : 400,
                 overflow: 'hidden',
@@ -144,7 +144,7 @@ export function BarChart({
         return (
           <div
             key={idx}
-            style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', cursor: 'pointer' }}
+            style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', cursor: 'pointer' }}
             onMouseEnter={() => setHoveredItem(item)}
             onMouseLeave={() => setHoveredItem(null)}
           >
@@ -170,17 +170,18 @@ export function BarChart({
             <div
               style={{
                 width: '100%',
-                height: '8px',
-                backgroundColor: 'rgba(51, 65, 85, 0.4)',
+                height: '6px',
+                backgroundColor: 'var(--color-bg-tertiary)',
                 borderRadius: 'var(--radius-full)',
-                overflow: 'hidden'
+                overflow: 'hidden',
+                border: '1px solid var(--color-border-subtle)'
               }}
             >
               <div
                 style={{
                   width: `${pct}%`,
                   height: '100%',
-                  backgroundColor: isMax ? 'var(--color-success)' : isHovered ? 'var(--color-primary-hover)' : barColor,
+                  backgroundColor: isMax ? 'var(--color-success)' : isHovered ? 'var(--color-text-primary)' : barColor,
                   borderRadius: 'var(--radius-full)',
                   transition: 'width var(--transition-normal)'
                 }}

@@ -1,9 +1,10 @@
 import React from 'react';
 
 /**
- * Standard Page Header with actions and breadcrumb/status area
+ * Editorial Page Header with eyebrow, large title, description, and action group
  */
 export function PageHeader({
+  eyebrow = null,
   title,
   description,
   badge,
@@ -25,14 +26,28 @@ export function PageHeader({
       }}
       className={`page-header ${className}`}
     >
-      <div style={{ flex: 1, minWidth: '240px' }}>
+      <div style={{ flex: 1, minWidth: '260px' }}>
+        {eyebrow && (
+          <div
+            style={{
+              fontSize: '10px',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.1em',
+              color: 'var(--color-text-dim)',
+              marginBottom: '0.25rem'
+            }}
+          >
+            {eyebrow}
+          </div>
+        )}
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
           <h1
             style={{
               fontSize: 'var(--font-size-2xl)',
-              fontWeight: 700,
+              fontWeight: 600,
               color: 'var(--color-text-primary)',
-              letterSpacing: '-0.02em',
+              letterSpacing: '-0.025em',
               margin: 0
             }}
           >
@@ -43,10 +58,12 @@ export function PageHeader({
         {description && (
           <p
             style={{
-              fontSize: 'var(--font-size-sm)',
+              fontSize: 'var(--font-size-xs)',
               color: 'var(--color-text-secondary)',
-              marginTop: 'var(--space-1)',
-              marginBottom: 0
+              marginTop: '0.35rem',
+              marginBottom: 0,
+              maxWidth: '720px',
+              lineHeight: 1.5
             }}
           >
             {description}

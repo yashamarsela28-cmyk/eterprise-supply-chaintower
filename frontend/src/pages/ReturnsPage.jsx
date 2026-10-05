@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { RotateCcw, RefreshCw, Plus, CheckCircle, PackageCheck, XCircle } from 'lucide-react';
 import { useApiQuery } from '../hooks/useApiQuery';
 import { usePagination } from '../hooks/usePagination';
 import * as returnService from '../services/returnService';
 import * as orderService from '../services/orderService';
 import * as productService from '../services/productService';
+import { normalizeList, normalizePagination } from '../utils/responseNormalizer';
 import { useToast } from '../context/ToastContext';
 import { PageHeader } from '../components/common/PageHeader';
 import { FilterBar } from '../components/common/FilterBar';
@@ -16,7 +17,7 @@ import { Button } from '../components/common/Button';
 import { Drawer } from '../components/common/Drawer';
 import { Modal } from '../components/common/Modal';
 import { StatusBadge } from '../components/common/StatusBadge';
-import { formatDate } from '../utils/formatters';
+import { formatDate, formatNumber } from '../utils/formatters';
 
 export function ReturnsPage() {
   const toast = useToast();
@@ -40,11 +41,35 @@ export function ReturnsPage() {
 
   const { page, limit, setPage, setLimit } = usePagination(1, 20);
 
-  const { data, loading, error, refetch } = useApiQuery(
+  const { data: rawData, loading, error, refetch } = useApiQuery(
     returnService.getReturns,
     { page, limit, search, status: statusFilter },
     { immediate: true }
   );
+
+  const returns = useMemo(() => normalizeList(rawData), [rawData]);
+  const pagination = useMemo(() => normalizePagination(rawData, returns, page, limit), [rawData, returns, page, limit]);
+
+  // Compute live summary stats
+  const summaryStats = useMemo(() => {
+    let pendingApproval = 0;
+    let inspectingRestocked = 0;
+    let completedRefunded = 0;
+
+    returns.forEach((r) => {
+      const st = (r.status || '').toUpperCase();
+      if (st === 'REQUESTED' || st === 'PENDING') pendingApproval += 1;
+      if (st === 'APPROVED' || st === 'RECEIVED' || st === 'INSPECTING') inspectingRestocked += 1;
+      if (st === 'REFUNDED' || st === 'COMPLETED') completedRefunded += 1;
+    });
+
+    return {
+      total: pagination.total || returns.length,
+      pending: pendingApproval,
+      inProcess: inspectingRestocked,
+      completed: completedRefunded
+    };
+  }, [returns, pagination.total]);
 
   useEffect(() => {
     if (isCreateOpen) {
@@ -52,8 +77,8 @@ export function ReturnsPage() {
         orderService.getOrders({ limit: 50 }).catch(() => ({ data: [] })),
         productService.getProducts({ limit: 50 }).catch(() => ({ data: [] }))
       ]).then(([ordRes, prodRes]) => {
-        const ords = ordRes?.data || [];
-        const prods = prodRes?.data || [];
+        const ords = normalizeList(ordRes);
+        const prods = normalizeList(prodRes);
         setOrders(ords);
         setProducts(prods);
 
@@ -69,9 +94,6 @@ export function ReturnsPage() {
     }
   }, [isCreateOpen]);
 
-  const returns = data?.data || [];
-  const pagination = data?.pagination || { total: returns.length, page, limit, totalPages: Math.ceil(returns.length / limit) || 1 };
-
   // Status Action Handler
   const handleAction = async (actionType) => {
     if (!selectedReturn) return;
@@ -82,13 +104,13 @@ export function ReturnsPage() {
       let res;
       if (actionType === 'APPROVE') {
         res = await returnService.approveReturn(returnId);
-        toast.success('RMA approved for customer return receipt');
+        toast.success(`RMA #${selectedReturn.return_number || returnId} approved for intake`);
       } else if (actionType === 'RECEIVE') {
         res = await returnService.receiveReturn(returnId);
-        toast.success('Return received and inventory restocked');
+        toast.success(`RMA #${selectedReturn.return_number || returnId} received and inventory updated`);
       } else if (actionType === 'REJECT') {
         res = await returnService.rejectReturn(returnId);
-        toast.success('RMA rejected');
+        toast.success(`RMA #${selectedReturn.return_number || returnId} rejected`);
       }
       setSelectedReturn(res?.data || null);
       refetch();
@@ -169,45 +191,54 @@ export function ReturnsPage() {
           <div style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
             {r.return_number || `RMA-${r.return_id || r.id}`}
           </div>
-          <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-            Date: {formatDate(r.created_at || r.return_date)}
+          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '0.15rem' }}>
+            Authorized: <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-secondary)' }}>{formatDate(r.created_at || r.return_date)}</span>
           </div>
         </div>
       )
     },
     {
       key: 'order_number',
-      header: 'Sales Order Ref',
-      render: (r) => r.sales_orders?.order_number || r.order_number || `Order #${r.sales_order_id}`
+      header: 'Original Order Ref',
+      render: (r) => (
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
+          {r.sales_orders?.order_number || r.order_number || `Order #${r.sales_order_id}`}
+        </span>
+      )
     },
     {
       key: 'reason',
-      header: 'Return Reason',
-      render: (r) => r.reason || 'Customer Return / Damaged'
+      header: 'Discrepancy / RMA Reason',
+      render: (r) => (
+        <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
+          {r.reason || 'Customer Return / Damaged'}
+        </span>
+      )
     },
     {
       key: 'status',
-      header: 'Status',
-      render: (r) => <StatusBadge status={r.status || 'REQUESTED'} />
+      header: 'Disposition State',
+      render: (r) => <StatusBadge status={r.status || 'REQUESTED'} size="sm" />
     }
   ];
 
   const currentStatus = (selectedReturn?.status || '').toUpperCase();
 
   return (
-    <div className="returns-page">
+    <div className="returns-page animate-fade-in">
       <PageHeader
-        title="Returns & RMA Quality Management"
-        description="Customer return authorizations, disposition inspection, and refund processing."
+        eyebrow="QUALITY // REVERSE LOGISTICS"
+        title="Returns & RMA Dispositions"
+        description="Customer return authorizations, warehouse QA inspection, salvage disposition, and credit reconciliations."
         actions={
           <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
             <Button
-              variant="secondary"
+              variant="outline"
               size="sm"
               icon={RefreshCw}
               onClick={refetch}
             >
-              Refresh
+              Refresh RMAs
             </Button>
             <Button
               variant="primary"
@@ -221,13 +252,87 @@ export function ReturnsPage() {
         }
       />
 
+      {/* KPI Summary Strip */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gap: 'var(--space-3)',
+          marginBottom: 'var(--space-5)'
+        }}
+      >
+        <div
+          style={{
+            padding: '0.85rem 1.15rem',
+            backgroundColor: 'var(--color-bg-card)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)'
+          }}
+        >
+          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Total RMAs Filed
+          </span>
+          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
+            {formatNumber(summaryStats.total)}
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: '0.85rem 1.15rem',
+            backgroundColor: 'var(--color-bg-card)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)'
+          }}
+        >
+          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Pending Authorization
+          </span>
+          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-warning-text)', fontFamily: 'var(--font-mono)' }}>
+            {formatNumber(summaryStats.pending)}
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: '0.85rem 1.15rem',
+            backgroundColor: 'var(--color-bg-card)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)'
+          }}
+        >
+          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Dock QA / In Inspection
+          </span>
+          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-info-text)', fontFamily: 'var(--font-mono)' }}>
+            {formatNumber(summaryStats.inProcess)}
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: '0.85rem 1.15rem',
+            backgroundColor: 'var(--color-bg-card)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)'
+          }}
+        >
+          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Resolved & Restocked
+          </span>
+          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-success-text)', fontFamily: 'var(--font-mono)' }}>
+            {formatNumber(summaryStats.completed)}
+          </div>
+        </div>
+      </div>
+
       <FilterBar
         search={search}
         onSearchChange={(val) => {
           setSearch(val);
           setPage(1);
         }}
-        searchPlaceholder="Search RMA number or reason..."
+        searchPlaceholder="Filter by RMA number, reason, order ref..."
         hasActiveFilters={Boolean(search || statusFilter)}
         onReset={() => {
           setSearch('');
@@ -260,6 +365,7 @@ export function ReturnsPage() {
         loading={loading}
         onRowClick={(ret) => setSelectedReturn(ret)}
         emptyTitle="No Return Records Found"
+        emptyMessage="No reverse logistics RMA records matched your filter criteria."
       />
 
       <Pagination
@@ -280,22 +386,23 @@ export function ReturnsPage() {
       >
         {selectedReturn && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-            <div style={{ padding: '1rem', backgroundColor: 'rgba(30, 41, 59, 0.4)', borderRadius: 'var(--radius-lg)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>Status</span>
-                <StatusBadge status={selectedReturn.status || 'REQUESTED'} />
+            <div style={{ padding: '0.85rem 1rem', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
+                <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>RMA State</span>
+                <StatusBadge status={selectedReturn.status || 'REQUESTED'} size="sm" />
               </div>
-              <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)' }}>
-                <strong>Reason:</strong> {selectedReturn.reason || 'Customer return'}
+              <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)', display: 'flex', justifyContent: 'space-between' }}>
+                <span>Return Type:</span>
+                <strong style={{ color: 'var(--color-text-primary)' }}>{selectedReturn.return_type || 'CUSTOMER_RETURN'}</strong>
               </div>
-              <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)', marginTop: '0.25rem' }}>
-                <strong>Return Type:</strong> {selectedReturn.return_type || 'CUSTOMER_RETURN'}
+              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)', marginTop: '0.4rem', borderTop: '1px solid var(--color-border-subtle)', paddingTop: '0.4rem' }}>
+                <strong style={{ color: 'var(--color-text-muted)' }}>Reason:</strong> {selectedReturn.reason || 'Customer Return'}
               </div>
             </div>
 
             {/* Operational Actions */}
-            <div style={{ padding: '1rem', backgroundColor: 'rgba(15, 23, 42, 0.6)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
-              <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '0.75rem', textTransform: 'uppercase' }}>
+            <div style={{ padding: '0.85rem 1rem', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
+              <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--color-text-muted)', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                 RMA Workflow Actions
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
@@ -345,30 +452,33 @@ export function ReturnsPage() {
             {/* Items */}
             {(selectedReturn.items || selectedReturn.return_items) && (selectedReturn.items || selectedReturn.return_items).length > 0 && (
               <div>
-                <h4 style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, marginBottom: 'var(--space-2)' }}>Returned Items</h4>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <h4 style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>
+                  Returned Line Items
+                </h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                   {(selectedReturn.items || selectedReturn.return_items).map((item, idx) => (
                     <div
                       key={idx}
                       style={{
-                        padding: '0.5rem 0.75rem',
-                        backgroundColor: 'rgba(30, 41, 59, 0.3)',
+                        padding: '0.65rem 0.85rem',
+                        backgroundColor: 'var(--color-bg-secondary)',
                         borderRadius: 'var(--radius-md)',
+                        border: '1px solid var(--color-border-subtle)',
                         display: 'flex',
                         justifyContent: 'space-between',
                         alignItems: 'center'
                       }}
                     >
                       <div>
-                        <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-primary)' }}>
+                        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-primary)', fontWeight: 600 }}>
                           {item.products?.name || item.product_name || `Product #${item.product_id}`}
                         </div>
-                        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-                          Condition: {item.condition || 'PENDING_INSPECTION'}
+                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                          Condition: <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-secondary)' }}>{item.condition || 'PENDING_INSPECTION'}</span>
                         </div>
                       </div>
-                      <span style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-                        {item.requested_quantity || item.quantity} units
+                      <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--color-danger-text)' }}>
+                        -{item.requested_quantity || item.quantity} units
                       </span>
                     </div>
                   ))}
@@ -450,9 +560,10 @@ export function ReturnsPage() {
                     gridTemplateColumns: '3fr 1.5fr 2fr auto',
                     gap: 'var(--space-2)',
                     alignItems: 'center',
-                    padding: '0.5rem',
-                    backgroundColor: 'rgba(15, 23, 42, 0.4)',
-                    borderRadius: 'var(--radius-md)'
+                    padding: '0.6rem',
+                    backgroundColor: 'var(--color-bg-secondary)',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--color-border-subtle)'
                   }}
                 >
                   <Select
@@ -488,7 +599,7 @@ export function ReturnsPage() {
                       type="button"
                       variant="ghost"
                       size="sm"
-                      style={{ color: 'var(--color-danger)' }}
+                      style={{ color: 'var(--color-danger-text)' }}
                       onClick={() => removeItemRow(idx)}
                     >
                       ✕

@@ -17,21 +17,21 @@ import {
 } from 'lucide-react';
 
 /**
- * Enterprise Navigation Configuration
- * Grouped Multi-Echelon Information Architecture
+ * Enterprise Navigation Hierarchy
+ * Structured strictly by supply-chain operational domains
  */
 export const NAVIGATION_SECTIONS = [
   {
-    title: 'CONTROL TOWER',
+    title: 'OVERVIEW',
     items: [
       {
-        title: 'Dashboard',
+        title: 'Control Tower',
         path: '/dashboard',
         icon: LayoutDashboard,
-        badge: 'Live'
+        badge: 'LIVE'
       },
       {
-        title: 'Analytics',
+        title: 'Analytics & KPIs',
         path: '/analytics',
         icon: BarChart3
       }
@@ -41,17 +41,12 @@ export const NAVIGATION_SECTIONS = [
     title: 'OPERATIONS',
     items: [
       {
-        title: 'Inventory',
-        path: '/inventory',
-        icon: Boxes
-      },
-      {
-        title: 'Orders',
+        title: 'Sales Orders',
         path: '/orders',
         icon: ShoppingCart
       },
       {
-        title: 'Shipments',
+        title: 'Shipments & Tracking',
         path: '/shipments',
         icon: Truck
       },
@@ -63,10 +58,30 @@ export const NAVIGATION_SECTIONS = [
     ]
   },
   {
+    title: 'INVENTORY & HUBS',
+    items: [
+      {
+        title: 'Inventory Control',
+        path: '/inventory',
+        icon: Boxes
+      },
+      {
+        title: 'Products & SKUs',
+        path: '/products',
+        icon: Package
+      },
+      {
+        title: 'Warehouses',
+        path: '/warehouses',
+        icon: Warehouse
+      }
+    ]
+  },
+  {
     title: 'PROCUREMENT',
     items: [
       {
-        title: 'Suppliers',
+        title: 'Suppliers Directory',
         path: '/suppliers',
         icon: Building2
       },
@@ -83,37 +98,22 @@ export const NAVIGATION_SECTIONS = [
     ]
   },
   {
-    title: 'MASTER DATA',
+    title: 'FINANCE & ACCOUNTS',
     items: [
       {
-        title: 'Products',
-        path: '/products',
-        icon: Package
-      },
-      {
-        title: 'Customers',
-        path: '/customers',
-        icon: Users
-      },
-      {
-        title: 'Warehouses',
-        path: '/warehouses',
-        icon: Warehouse
-      }
-    ]
-  },
-  {
-    title: 'FINANCE',
-    items: [
-      {
-        title: 'Invoices',
+        title: 'Invoices & AR',
         path: '/invoices',
         icon: Receipt
       },
       {
-        title: 'Payments',
+        title: 'Payment Journal',
         path: '/payments',
         icon: CreditCard
+      },
+      {
+        title: 'Customers Directory',
+        path: '/customers',
+        icon: Users
       }
     ]
   },
@@ -121,7 +121,7 @@ export const NAVIGATION_SECTIONS = [
     title: 'QUALITY & RETURNS',
     items: [
       {
-        title: 'Returns',
+        title: 'Returns & RMA',
         path: '/returns',
         icon: RotateCcw
       }

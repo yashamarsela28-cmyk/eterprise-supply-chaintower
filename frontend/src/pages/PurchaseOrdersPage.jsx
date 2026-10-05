@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { FileSpreadsheet, RefreshCw, Plus, CheckCircle, Send, XCircle, PackageCheck } from 'lucide-react';
 import { useApiQuery } from '../hooks/useApiQuery';
 import { usePagination } from '../hooks/usePagination';
@@ -6,6 +6,7 @@ import * as purchaseOrderService from '../services/purchaseOrderService';
 import * as supplierService from '../services/supplierService';
 import * as warehouseService from '../services/warehouseService';
 import * as productService from '../services/productService';
+import { normalizeList, normalizePagination } from '../utils/responseNormalizer';
 import { useToast } from '../context/ToastContext';
 import { PageHeader } from '../components/common/PageHeader';
 import { FilterBar } from '../components/common/FilterBar';
@@ -17,7 +18,7 @@ import { Button } from '../components/common/Button';
 import { Drawer } from '../components/common/Drawer';
 import { Modal } from '../components/common/Modal';
 import { StatusBadge } from '../components/common/StatusBadge';
-import { formatCurrency, formatDate } from '../utils/formatters';
+import { formatCurrency, formatDate, formatNumber } from '../utils/formatters';
 
 export function PurchaseOrdersPage() {
   const toast = useToast();
@@ -42,11 +43,39 @@ export function PurchaseOrdersPage() {
 
   const { page, limit, setPage, setLimit } = usePagination(1, 20);
 
-  const { data, loading, error, refetch } = useApiQuery(
+  const { data: rawData, loading, error, refetch } = useApiQuery(
     purchaseOrderService.getPurchaseOrders,
     { page, limit, search, status: statusFilter },
     { immediate: true }
   );
+
+  const orders = useMemo(() => normalizeList(rawData), [rawData]);
+  const pagination = useMemo(() => normalizePagination(rawData, orders, page, limit), [rawData, orders, page, limit]);
+
+  // Compute live summary stats
+  const summaryStats = useMemo(() => {
+    let totalSpend = 0;
+    let inFlightCount = 0;
+    let completedCount = 0;
+
+    orders.forEach((po) => {
+      totalSpend += Number(po.total_amount || 0);
+      const st = (po.status || '').toUpperCase();
+      if (st === 'DRAFT' || st === 'SUBMITTED' || st === 'APPROVED' || st === 'PARTIALLY_RECEIVED') {
+        inFlightCount += 1;
+      }
+      if (st === 'RECEIVED') {
+        completedCount += 1;
+      }
+    });
+
+    return {
+      total: pagination.total || orders.length,
+      inFlight: inFlightCount,
+      received: completedCount,
+      totalSpend
+    };
+  }, [orders, pagination.total]);
 
   useEffect(() => {
     if (isCreateOpen) {
@@ -55,9 +84,9 @@ export function PurchaseOrdersPage() {
         warehouseService.getWarehouses({ limit: 50 }).catch(() => ({ data: [] })),
         productService.getProducts({ limit: 50 }).catch(() => ({ data: [] }))
       ]).then(([supRes, whRes, prodRes]) => {
-        const sups = supRes?.data || [];
-        const whs = whRes?.data || [];
-        const prods = prodRes?.data || [];
+        const sups = normalizeList(supRes);
+        const whs = normalizeList(whRes);
+        const prods = normalizeList(prodRes);
         setSuppliers(sups);
         setWarehouses(whs);
         setProducts(prods);
@@ -77,9 +106,6 @@ export function PurchaseOrdersPage() {
     }
   }, [isCreateOpen]);
 
-  const orders = data?.data || [];
-  const pagination = data?.pagination || { total: orders.length, page, limit, totalPages: Math.ceil(orders.length / limit) || 1 };
-
   // Status Action Handlers
   const handleAction = async (actionType) => {
     if (!selectedPO) return;
@@ -90,13 +116,13 @@ export function PurchaseOrdersPage() {
       let res;
       if (actionType === 'SUBMIT') {
         res = await purchaseOrderService.submitPurchaseOrder(poId);
-        toast.success('Purchase Order submitted for managerial approval');
+        toast.success(`Purchase Order #${selectedPO.po_number || poId} submitted for approval`);
       } else if (actionType === 'APPROVE') {
         res = await purchaseOrderService.approvePurchaseOrder(poId);
-        toast.success('Purchase Order approved for vendor fulfillment');
+        toast.success(`Purchase Order #${selectedPO.po_number || poId} approved for fulfillment`);
       } else if (actionType === 'CANCEL') {
         res = await purchaseOrderService.cancelPurchaseOrder(poId);
-        toast.success('Purchase Order cancelled');
+        toast.success(`Purchase Order #${selectedPO.po_number || poId} cancelled`);
       }
       setSelectedPO(res?.data || null);
       refetch();
@@ -177,8 +203,8 @@ export function PurchaseOrdersPage() {
           <div style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
             {r.po_number || `PO-${r.po_id || r.id}`}
           </div>
-          <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-            Date: {formatDate(r.created_at || r.order_date)}
+          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '0.15rem' }}>
+            Date: <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-secondary)' }}>{formatDate(r.created_at || r.order_date)}</span>
           </div>
         </div>
       )
@@ -186,46 +212,60 @@ export function PurchaseOrdersPage() {
     {
       key: 'supplier',
       header: 'Supplier / Vendor',
-      render: (r) => r.suppliers?.name || r.supplier_name || `Supplier #${r.supplier_id}`
+      render: (r) => (
+        <div>
+          <div style={{ fontWeight: 500, color: 'var(--color-text-primary)' }}>
+            {r.suppliers?.name || r.supplier_name || `Supplier #${r.supplier_id}`}
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+            {r.suppliers?.code || 'Approved Vendor'}
+          </div>
+        </div>
+      )
     },
     {
       key: 'warehouse',
       header: 'Receiving Hub',
-      render: (r) => r.warehouses?.name || r.warehouse_name || 'Central Facility'
+      render: (r) => (
+        <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
+          {r.warehouses?.name || r.warehouse_name || 'Central Facility'}
+        </span>
+      )
     },
     {
       key: 'total_amount',
       header: 'Total Valuation',
       align: 'right',
       render: (r) => (
-        <span style={{ fontWeight: 600 }}>
+        <span style={{ fontWeight: 600, fontFamily: 'var(--font-mono)', color: 'var(--color-text-primary)' }}>
           {formatCurrency(r.total_amount || 0)}
         </span>
       )
     },
     {
       key: 'status',
-      header: 'Status',
-      render: (r) => <StatusBadge status={r.status} />
+      header: 'Procurement State',
+      render: (r) => <StatusBadge status={r.status} size="sm" />
     }
   ];
 
   const currentStatus = (selectedPO?.status || '').toUpperCase();
 
   return (
-    <div className="purchase-orders-page">
+    <div className="purchase-orders-page animate-fade-in">
       <PageHeader
+        eyebrow="PROCUREMENT // INBOUND REPLENISHMENT"
         title="Purchase Orders & Procurement"
-        description="Inbound replenishment orders, supplier contracts, and receiving schedules."
+        description="Inbound replenishment orders, supplier contracts, dock intake schedules, and vendor authorizations."
         actions={
           <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
             <Button
-              variant="secondary"
+              variant="outline"
               size="sm"
               icon={RefreshCw}
               onClick={refetch}
             >
-              Refresh
+              Refresh POs
             </Button>
             <Button
               variant="primary"
@@ -239,13 +279,87 @@ export function PurchaseOrdersPage() {
         }
       />
 
+      {/* KPI Summary Strip */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gap: 'var(--space-3)',
+          marginBottom: 'var(--space-5)'
+        }}
+      >
+        <div
+          style={{
+            padding: '0.85rem 1.15rem',
+            backgroundColor: 'var(--color-bg-card)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)'
+          }}
+        >
+          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Total Inbound POs
+          </span>
+          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
+            {formatNumber(summaryStats.total)}
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: '0.85rem 1.15rem',
+            backgroundColor: 'var(--color-bg-card)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)'
+          }}
+        >
+          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            In-Flight Procurement
+          </span>
+          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-warning-text)', fontFamily: 'var(--font-mono)' }}>
+            {formatNumber(summaryStats.inFlight)}
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: '0.85rem 1.15rem',
+            backgroundColor: 'var(--color-bg-card)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)'
+          }}
+        >
+          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Completed & Ingested
+          </span>
+          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-success-text)', fontFamily: 'var(--font-mono)' }}>
+            {formatNumber(summaryStats.received)}
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: '0.85rem 1.15rem',
+            backgroundColor: 'var(--color-bg-card)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)'
+          }}
+        >
+          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Procurement Commitment
+          </span>
+          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
+            {formatCurrency(summaryStats.totalSpend)}
+          </div>
+        </div>
+      </div>
+
       <FilterBar
         search={search}
         onSearchChange={(val) => {
           setSearch(val);
           setPage(1);
         }}
-        searchPlaceholder="Search PO number or supplier..."
+        searchPlaceholder="Filter by PO number, supplier, code..."
         hasActiveFilters={Boolean(search || statusFilter)}
         onReset={() => {
           setSearch('');
@@ -277,6 +391,7 @@ export function PurchaseOrdersPage() {
         loading={loading}
         onRowClick={(po) => setSelectedPO(po)}
         emptyTitle="No Purchase Orders Found"
+        emptyMessage="No procurement purchase orders matched your criteria."
       />
 
       <Pagination
@@ -297,23 +412,24 @@ export function PurchaseOrdersPage() {
       >
         {selectedPO && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-            <div style={{ padding: '1rem', backgroundColor: 'rgba(30, 41, 59, 0.4)', borderRadius: 'var(--radius-lg)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>Status</span>
-                <StatusBadge status={selectedPO.status} />
+            <div style={{ padding: '0.85rem 1rem', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
+                <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Lifecycle Status</span>
+                <StatusBadge status={selectedPO.status} size="sm" />
               </div>
-              <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)' }}>
-                <strong>Total Amount:</strong> {formatCurrency(selectedPO.total_amount || 0)}
+              <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)', display: 'flex', justifyContent: 'space-between' }}>
+                <span>Total Amount:</span>
+                <strong style={{ color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>{formatCurrency(selectedPO.total_amount || 0)}</strong>
               </div>
-              <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)', marginTop: '0.25rem' }}>
-                <strong>Receiving Hub:</strong> {selectedPO.warehouses?.name || 'Central Facility'}
+              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)', marginTop: '0.4rem', borderTop: '1px solid var(--color-border-subtle)', paddingTop: '0.4rem' }}>
+                <strong style={{ color: 'var(--color-text-muted)' }}>Receiving Hub:</strong> {selectedPO.warehouses?.name || 'Central Facility'}
               </div>
             </div>
 
             {/* Operational Actions */}
-            <div style={{ padding: '1rem', backgroundColor: 'rgba(15, 23, 42, 0.6)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
-              <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '0.75rem', textTransform: 'uppercase' }}>
-                Procurement Actions
+            <div style={{ padding: '0.85rem 1rem', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
+              <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--color-text-muted)', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Procurement Controls
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
                 {currentStatus === 'DRAFT' && (
@@ -364,7 +480,7 @@ export function PurchaseOrdersPage() {
 
                 {['APPROVED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED'].includes(currentStatus) && (
                   <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
-                    Status: {currentStatus}. {currentStatus === 'APPROVED' ? 'Ready for warehouse goods receipt.' : 'Terminal procurement state.'}
+                    Status: {currentStatus}. {currentStatus === 'APPROVED' ? 'Approved for warehouse dock receipt.' : 'Terminal procurement state.'}
                   </div>
                 )}
               </div>
@@ -373,29 +489,32 @@ export function PurchaseOrdersPage() {
             {/* Line Items */}
             {selectedPO.po_items && selectedPO.po_items.length > 0 && (
               <div>
-                <h4 style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, marginBottom: 'var(--space-2)' }}>PO Line Items</h4>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <h4 style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>
+                  PO Line Items ({selectedPO.po_items.length})
+                </h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                   {selectedPO.po_items.map((item, idx) => (
                     <div
                       key={idx}
                       style={{
-                        padding: '0.5rem 0.75rem',
-                        backgroundColor: 'rgba(30, 41, 59, 0.3)',
+                        padding: '0.65rem 0.85rem',
+                        backgroundColor: 'var(--color-bg-secondary)',
                         borderRadius: 'var(--radius-md)',
+                        border: '1px solid var(--color-border-subtle)',
                         display: 'flex',
                         justifyContent: 'space-between',
                         alignItems: 'center'
                       }}
                     >
                       <div>
-                        <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-primary)', fontWeight: 500 }}>
+                        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-primary)', fontWeight: 600 }}>
                           {item.products?.name || item.product_name || `Product #${item.product_id}`}
                         </div>
-                        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-                          Qty: {item.ordered_quantity || item.quantity} • Unit Cost: {formatCurrency(item.unit_cost || 0)}
+                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                          Qty: <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-secondary)' }}>{item.ordered_quantity || item.quantity}</span> • Cost: {formatCurrency(item.unit_cost || 0)}
                         </div>
                       </div>
-                      <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+                      <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--color-text-primary)' }}>
                         {formatCurrency(item.subtotal || (item.ordered_quantity || item.quantity || 1) * (item.unit_cost || 0))}
                       </div>
                     </div>
@@ -412,7 +531,7 @@ export function PurchaseOrdersPage() {
         isOpen={isCreateOpen}
         onClose={() => !createSubmitting && setIsCreateOpen(false)}
         title="Create Purchase Order"
-        subtitle="Issue an inbound inventory replenishment order to vendor."
+        subtitle="Issue an inbound inventory replenishment order to vendor partner."
         size="lg"
         footer={
           <>
@@ -428,7 +547,7 @@ export function PurchaseOrdersPage() {
               loading={createSubmitting}
               onClick={handleCreateSubmit}
             >
-              Create Purchase Order
+              Issue Purchase Order
             </Button>
           </>
         }
@@ -447,7 +566,7 @@ export function PurchaseOrdersPage() {
             />
 
             <Select
-              label="Receiving Warehouse"
+              label="Receiving Warehouse Facility"
               required
               value={newPO.warehouse_id}
               onChange={(e) => setNewPO({ ...newPO, warehouse_id: e.target.value })}
@@ -459,7 +578,7 @@ export function PurchaseOrdersPage() {
           </div>
 
           <Input
-            label="Expected Delivery Date"
+            label="Expected Delivery Schedule Date"
             type="date"
             value={newPO.expected_delivery_date}
             onChange={(e) => setNewPO({ ...newPO, expected_delivery_date: e.target.value })}
@@ -468,7 +587,7 @@ export function PurchaseOrdersPage() {
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-2)' }}>
               <label style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text-secondary)' }}>
-                Replenishment Items
+                Replenishment Line Items
               </label>
               <Button
                 type="button"
@@ -490,9 +609,10 @@ export function PurchaseOrdersPage() {
                     gridTemplateColumns: '3fr 1.5fr 2fr auto',
                     gap: 'var(--space-2)',
                     alignItems: 'center',
-                    padding: '0.5rem',
-                    backgroundColor: 'rgba(15, 23, 42, 0.4)',
-                    borderRadius: 'var(--radius-md)'
+                    padding: '0.6rem',
+                    backgroundColor: 'var(--color-bg-secondary)',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--color-border-subtle)'
                   }}
                 >
                   <Select
@@ -526,7 +646,7 @@ export function PurchaseOrdersPage() {
                       type="button"
                       variant="ghost"
                       size="sm"
-                      style={{ color: 'var(--color-danger)' }}
+                      style={{ color: 'var(--color-danger-text)' }}
                       onClick={() => removeItemRow(idx)}
                     >
                       ✕

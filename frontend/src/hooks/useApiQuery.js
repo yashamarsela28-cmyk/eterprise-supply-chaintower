@@ -2,7 +2,9 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 
 /**
  * Enterprise API Query Hook
- * @param {Function} fetcher - Async function that returns API response
+ * Connects to live backend Express endpoints and safely normalizes response envelopes.
+ *
+ * @param {Function} fetcher - Async function returning API response { success, count, data, pagination }
  * @param {Object} [options] - Options including params, initialData, enabled
  */
 export function useApiQuery(fetcher, options = {}) {
@@ -14,11 +16,9 @@ export function useApiQuery(fetcher, options = {}) {
   const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState(null);
 
-  // Keep a ref to the latest fetcher to avoid unnecessary effect triggers
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
 
-  // Track request sequence to prevent race conditions
   const requestIdRef = useRef(0);
 
   const execute = useCallback(async (customParams = null) => {
@@ -33,20 +33,24 @@ export function useApiQuery(fetcher, options = {}) {
     try {
       const response = await fetcherRef.current(queryParams);
 
-      // Only apply result if this is the most recent request
       if (currentRequestId === requestIdRef.current) {
         if (response && response.success !== false) {
-          setData(response.data !== undefined ? response.data : response);
+          // Preserve full response envelope so callers can access response.data, response.pagination, etc.
+          setData(response);
           setPagination(response.pagination || null);
-          setCount(response.count !== undefined ? response.count : (Array.isArray(response.data) ? response.data.length : 0));
+          setCount(
+            response.count !== undefined
+              ? response.count
+              : (Array.isArray(response.data) ? response.data.length : 0)
+          );
         } else {
-          throw new Error(response?.message || 'Failed to fetch data');
+          throw new Error(response?.message || 'Failed to fetch data from API');
         }
         setLoading(false);
       }
     } catch (err) {
       if (currentRequestId === requestIdRef.current) {
-        setError(err.message || 'An unexpected error occurred');
+        setError(err.message || 'An unexpected error occurred while communicating with the Control Tower service');
         setLoading(false);
       }
     }

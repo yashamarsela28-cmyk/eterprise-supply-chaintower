@@ -6,13 +6,13 @@ import {
   Truck,
   AlertTriangle,
   TrendingUp,
-  Building2,
   DollarSign,
-  PackageCheck,
   RefreshCw,
   ArrowRight,
   Warehouse,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Activity,
+  ShieldCheck
 } from 'lucide-react';
 import { useApiQuery } from '../hooks/useApiQuery';
 import { getDashboardMetrics } from '../services/dashboardService';
@@ -21,6 +21,7 @@ import {
   getWarehouseKpis,
   getWarehouseUtilizationKpis
 } from '../services/analyticsService';
+import { normalizeObject, normalizeList } from '../utils/responseNormalizer';
 import { PageHeader } from '../components/common/PageHeader';
 import { KpiCard } from '../components/common/KpiCard';
 import { Card } from '../components/common/Card';
@@ -30,39 +31,38 @@ import { LoadingState } from '../components/common/LoadingState';
 import { ErrorState } from '../components/common/ErrorState';
 import { ProgressBar } from '../components/common/ProgressBar';
 import { BarChart } from '../components/common/BarChart';
-import { DonutGauge } from '../components/common/DonutGauge';
 import { formatCurrency, formatNumber, formatDate, formatPercentage } from '../utils/formatters';
 
 /**
  * Enterprise Executive Control Tower Dashboard
- * Desktop-First, Real Data Connected Multi-Echelon Overview
+ * High-density editorial command interface with live multi-echelon telemetry
  */
 export function DashboardPage() {
   const navigate = useNavigate();
 
   // Load Operational Metrics
-  const { data: metricsData, loading: metricsLoading, error: metricsError, refetch: refetchMetrics } = useApiQuery(
+  const { data: metricsRaw, loading: metricsLoading, error: metricsError, refetch: refetchMetrics } = useApiQuery(
     getDashboardMetrics,
     {},
     { immediate: true }
   );
 
   // Load Analytics Scorecard
-  const { data: scorecardData, loading: scoreLoading, refetch: refetchScore } = useApiQuery(
+  const { data: scorecardRaw, loading: scoreLoading, refetch: refetchScore } = useApiQuery(
     getSupplyChainScorecard,
     {},
     { immediate: true }
   );
 
-  // Load Warehouse KPIs for throughput chart
-  const { data: whKpisData, loading: whLoading, refetch: refetchWh } = useApiQuery(
+  // Load Warehouse KPIs for valuation chart
+  const { data: whKpisRaw, loading: whLoading, refetch: refetchWh } = useApiQuery(
     getWarehouseKpis,
     {},
     { immediate: true }
   );
 
-  // Load Warehouse Utilization for capacity bars
-  const { data: whUtilData, loading: utilLoading, refetch: refetchUtil } = useApiQuery(
+  // Load Warehouse Utilization for capacity telemetry
+  const { data: whUtilRaw, loading: utilLoading, refetch: refetchUtil } = useApiQuery(
     getWarehouseUtilizationKpis,
     {},
     { immediate: true }
@@ -75,16 +75,17 @@ export function DashboardPage() {
     refetchUtil();
   };
 
-  const metrics = metricsData?.data || {};
-  const scorecard = scorecardData?.data || {};
-  const warehouseKpis = whKpisData?.data || [];
-  const warehouseUtil = whUtilData?.data || [];
+  // Defensive Normalization: Always extracts valid object/array regardless of wrapper depth
+  const metrics = normalizeObject(metricsRaw);
+  const scorecard = normalizeObject(scorecardRaw);
+  const warehouseKpis = normalizeList(whKpisRaw);
+  const warehouseUtil = normalizeList(whUtilRaw);
 
-  if (metricsLoading && scoreLoading) {
+  if (metricsLoading && scoreLoading && !metricsRaw && !scorecardRaw) {
     return <LoadingState message="Connecting to Supply Chain Control Tower..." fullPage />;
   }
 
-  if (metricsError && !metricsData) {
+  if (metricsError && !metricsRaw) {
     return (
       <ErrorState
         title="Failed to Load Control Tower"
@@ -95,19 +96,23 @@ export function DashboardPage() {
   }
 
   // Transform warehouse KPIs for bar chart
-  const whChartData = warehouseKpis.map(w => ({
-    label: w.warehouse_name || w.warehouse_code,
+  const whChartData = warehouseKpis.map((w) => ({
+    label: w.warehouse_name || w.warehouse_code || 'Facility',
     value: Number(w.total_inventory_value) || 0
   }));
 
+  const recentOrders = Array.isArray(metrics.recentOrders) ? metrics.recentOrders : [];
+  const lowStockItems = Array.isArray(metrics.lowStockItems) ? metrics.lowStockItems : [];
+
   return (
     <div className="dashboard-page animate-fade-in">
-      {/* Top Header with Real Actions */}
+      {/* Editorial Page Header */}
       <PageHeader
+        eyebrow="CONTROL TOWER // REAL-TIME COMMAND"
         title="Executive Control Tower"
-        description="Real-time end-to-end operational visibility, fulfillment velocity, and logistics telemetry."
+        description="Real-time multi-echelon telemetry across inventory valuation, procurement pipeline, and logistics transit."
         actions={
-          <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
             <Button
               variant="outline"
               size="sm"
@@ -117,12 +122,12 @@ export function DashboardPage() {
               Refresh
             </Button>
             <Button
-              variant="outline"
+              variant="secondary"
               size="sm"
               icon={Boxes}
               onClick={() => navigate('/inventory')}
             >
-              View Inventory
+              Inventory
             </Button>
             <Button
               variant="primary"
@@ -130,51 +135,55 @@ export function DashboardPage() {
               icon={ShoppingCart}
               onClick={() => navigate('/orders')}
             >
-              View Orders
+              Sales Orders
             </Button>
           </div>
         }
       />
 
-      {/* Primary KPI Metrics Grid */}
+      {/* Primary KPI Strip */}
       <div
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
           gap: 'var(--space-4)',
-          marginBottom: 'var(--space-6)'
+          marginBottom: 'var(--space-5)'
         }}
       >
         <KpiCard
           title="Total Stock Valuation"
           value={formatCurrency(scorecard.total_inventory_value || 0)}
           icon={DollarSign}
-          status="primary"
-          changeLabel="Across All Hubs"
+          color="primary"
+          subtitle="Across all physical hubs"
+          badge={{ text: 'Live', variant: 'neutral' }}
         />
 
         <KpiCard
           title="Fulfillment Rate"
           value={formatPercentage(scorecard.fulfillment_rate || 95)}
           icon={TrendingUp}
-          status="success"
-          changeLabel="Target: 95.0%"
+          color="success"
+          trend={{ value: 'Target: 95.0%', isPositive: true }}
+          subtitle="Order dispatch velocity"
         />
 
         <KpiCard
           title="Low Stock Watchlist"
           value={formatNumber(metrics.lowStockItemsCount || 0)}
           icon={AlertTriangle}
-          status={metrics.lowStockItemsCount > 0 ? 'danger' : 'success'}
-          changeLabel={metrics.lowStockItemsCount > 0 ? 'Action Required' : 'Optimal Levels'}
+          color={metrics.lowStockItemsCount > 0 ? 'warning' : 'success'}
+          subtitle={metrics.lowStockItemsCount > 0 ? 'Requires replenishment' : 'Optimal stock levels'}
+          badge={metrics.lowStockItemsCount > 0 ? { text: 'Alert', variant: 'warning' } : { text: 'Nominal', variant: 'success' }}
         />
 
         <KpiCard
           title="Shipments In Transit"
           value={formatNumber(metrics.inTransitShipmentsCount || 0)}
           icon={Truck}
-          status="info"
-          changeLabel="Active Freight"
+          color="info"
+          subtitle="Active multi-modal freight"
+          badge={{ text: 'En Route', variant: 'info' }}
         />
       </div>
 
@@ -183,96 +192,100 @@ export function DashboardPage() {
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: 'var(--space-4)',
+          gap: 'var(--space-3)',
           marginBottom: 'var(--space-6)'
         }}
       >
         <div
           style={{
-            padding: '1rem 1.25rem',
+            padding: '0.875rem 1.15rem',
             backgroundColor: 'var(--color-bg-card)',
-            border: '1px solid var(--color-border-subtle)',
-            borderRadius: 'var(--radius-xl)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between'
+            justifyContent: 'space-between',
+            gap: 'var(--space-3)'
           }}
         >
           <div>
-            <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', fontWeight: 500 }}>
+            <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               Catalog SKUs
             </span>
-            <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)' }}>
+            <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
               {formatNumber(metrics.totalInventoryItems || 0)}
             </div>
           </div>
-          <Boxes size={24} style={{ color: 'var(--color-primary)', opacity: 0.8 }} />
+          <Boxes size={20} style={{ color: 'var(--color-text-secondary)', opacity: 0.7 }} />
         </div>
 
         <div
           style={{
-            padding: '1rem 1.25rem',
+            padding: '0.875rem 1.15rem',
             backgroundColor: 'var(--color-bg-card)',
-            border: '1px solid var(--color-border-subtle)',
-            borderRadius: 'var(--radius-xl)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between'
+            justifyContent: 'space-between',
+            gap: 'var(--space-3)'
           }}
         >
           <div>
-            <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', fontWeight: 500 }}>
+            <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               Pending Sales Orders
             </span>
-            <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-warning)' }}>
+            <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-warning)', fontFamily: 'var(--font-mono)' }}>
               {formatNumber(metrics.pendingOrdersCount || 0)}
             </div>
           </div>
-          <ShoppingCart size={24} style={{ color: 'var(--color-warning)', opacity: 0.8 }} />
+          <ShoppingCart size={20} style={{ color: 'var(--color-warning)', opacity: 0.8 }} />
         </div>
 
         <div
           style={{
-            padding: '1rem 1.25rem',
+            padding: '0.875rem 1.15rem',
             backgroundColor: 'var(--color-bg-card)',
-            border: '1px solid var(--color-border-subtle)',
-            borderRadius: 'var(--radius-xl)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between'
+            justifyContent: 'space-between',
+            gap: 'var(--space-3)'
           }}
         >
           <div>
-            <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', fontWeight: 500 }}>
+            <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               Open Purchase Orders
             </span>
-            <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)' }}>
+            <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-purple-text)', fontFamily: 'var(--font-mono)' }}>
               {formatNumber(scorecard.open_purchase_orders || 0)}
             </div>
           </div>
-          <FileSpreadsheet size={24} style={{ color: 'var(--color-purple)', opacity: 0.8 }} />
+          <FileSpreadsheet size={20} style={{ color: 'var(--color-purple-text)', opacity: 0.8 }} />
         </div>
 
         <div
           style={{
-            padding: '1rem 1.25rem',
+            padding: '0.875rem 1.15rem',
             backgroundColor: 'var(--color-bg-card)',
-            border: '1px solid var(--color-border-subtle)',
-            borderRadius: 'var(--radius-xl)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between'
+            justifyContent: 'space-between',
+            gap: 'var(--space-3)'
           }}
         >
           <div>
-            <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', fontWeight: 500 }}>
+            <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               Active Warehouses
             </span>
-            <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)' }}>
+            <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
               {formatNumber(scorecard.active_warehouses || 3)}
             </div>
           </div>
-          <Warehouse size={24} style={{ color: 'var(--color-info)', opacity: 0.8 }} />
+          <Warehouse size={20} style={{ color: 'var(--color-info-text)', opacity: 0.8 }} />
         </div>
       </div>
 
@@ -281,7 +294,7 @@ export function DashboardPage() {
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))',
-          gap: 'var(--space-6)',
+          gap: 'var(--space-5)',
           marginBottom: 'var(--space-6)'
         }}
       >
@@ -289,11 +302,13 @@ export function DashboardPage() {
         <Card
           title="Facility Inventory Valuation"
           subtitle="Real-time stock capital distribution across active physical warehouses"
-          headerAction={
+          headerBorder
+          action={
             <Button
               variant="ghost"
               size="sm"
               icon={ArrowRight}
+              iconPosition="right"
               onClick={() => navigate('/warehouses')}
             >
               Hub Details
@@ -306,7 +321,7 @@ export function DashboardPage() {
             valueKey="value"
             valueFormatter={formatCurrency}
             orientation="horizontal"
-            barColor="var(--color-primary)"
+            barColor="var(--color-border-strong)"
             highlightMax
           />
         </Card>
@@ -315,19 +330,21 @@ export function DashboardPage() {
         <Card
           title="Warehouse Capacity & Utilization"
           subtitle="Physical cubic and pallet space occupancy by facility"
-          headerAction={
+          headerBorder
+          action={
             <Button
               variant="ghost"
               size="sm"
               icon={ArrowRight}
+              iconPosition="right"
               onClick={() => navigate('/analytics')}
             >
-              Full Analytics
+              Analytics
             </Button>
           }
         >
           {warehouseUtil.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
               {warehouseUtil.map((wh, idx) => (
                 <ProgressBar
                   key={idx}
@@ -340,8 +357,8 @@ export function DashboardPage() {
               ))}
             </div>
           ) : (
-            <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)' }}>
-              Loading capacity analytics...
+            <div style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)' }}>
+              No capacity metrics recorded.
             </div>
           )}
         </Card>
@@ -352,27 +369,29 @@ export function DashboardPage() {
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))',
-          gap: 'var(--space-6)'
+          gap: 'var(--space-5)'
         }}
       >
         {/* Recent Orders Card */}
         <Card
           title="Recent Sales Orders"
           subtitle="Latest client demands in the fulfillment pipeline"
-          headerAction={
+          headerBorder
+          action={
             <Button
               variant="ghost"
               size="sm"
               icon={ArrowRight}
+              iconPosition="right"
               onClick={() => navigate('/orders')}
             >
               All Orders
             </Button>
           }
         >
-          {metrics.recentOrders && metrics.recentOrders.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-              {metrics.recentOrders.slice(0, 5).map((order) => (
+          {recentOrders.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {recentOrders.slice(0, 5).map((order) => (
                 <div
                   key={order.id}
                   onClick={() => navigate('/orders')}
@@ -381,14 +400,20 @@ export function DashboardPage() {
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     padding: '0.65rem 0.85rem',
-                    backgroundColor: 'rgba(30, 41, 59, 0.4)',
-                    borderRadius: 'var(--radius-lg)',
+                    backgroundColor: 'var(--color-bg-secondary)',
+                    borderRadius: 'var(--radius-md)',
                     border: '1px solid var(--color-border-subtle)',
                     cursor: 'pointer',
                     transition: 'all var(--transition-fast)'
                   }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'rgba(30, 41, 59, 0.4)')}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
+                    e.currentTarget.style.borderColor = 'var(--color-border-strong)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)';
+                    e.currentTarget.style.borderColor = 'var(--color-border-subtle)';
+                  }}
                 >
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
                     <span style={{ fontWeight: 600, fontSize: 'var(--font-size-xs)', color: 'var(--color-text-primary)' }}>
@@ -419,20 +444,22 @@ export function DashboardPage() {
         <Card
           title="Stock Alert Watchlist"
           subtitle="Inventory items requiring replenishment"
-          headerAction={
+          headerBorder
+          action={
             <Button
               variant="ghost"
               size="sm"
               icon={ArrowRight}
+              iconPosition="right"
               onClick={() => navigate('/inventory')}
             >
               Inventory Control
             </Button>
           }
         >
-          {metrics.lowStockItems && metrics.lowStockItems.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-              {metrics.lowStockItems.slice(0, 5).map((item) => (
+          {lowStockItems.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {lowStockItems.slice(0, 5).map((item) => (
                 <div
                   key={item.id}
                   onClick={() => navigate('/inventory')}
@@ -441,35 +468,41 @@ export function DashboardPage() {
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     padding: '0.65rem 0.85rem',
-                    backgroundColor: 'rgba(239, 68, 68, 0.05)',
-                    borderRadius: 'var(--radius-lg)',
-                    border: '1px solid rgba(239, 68, 68, 0.2)',
+                    backgroundColor: 'var(--color-bg-secondary)',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--color-border-subtle)',
                     cursor: 'pointer',
                     transition: 'all var(--transition-fast)'
                   }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.1)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.05)')}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
+                    e.currentTarget.style.borderColor = 'var(--color-border-strong)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)';
+                    e.currentTarget.style.borderColor = 'var(--color-border-subtle)';
+                  }}
                 >
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
                     <span style={{ fontWeight: 600, fontSize: 'var(--font-size-xs)', color: 'var(--color-text-primary)' }}>
                       {item.products?.name || item.product_name || `SKU #${item.id?.slice(0, 8)}`}
                     </span>
                     <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
-                      Warehouse: {item.warehouses?.name || item.warehouse_name || 'Central Facility'}
+                      Hub: {item.warehouses?.name || item.warehouse_name || 'Central Facility'}
                     </span>
                   </div>
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
                     <div style={{ textAlign: 'right' }}>
-                      <span style={{ display: 'block', fontWeight: 700, fontSize: 'var(--font-size-xs)', color: 'var(--color-danger)', fontFamily: 'var(--font-mono)' }}>
-                        {item.quantity_available !== undefined ? item.quantity_available : item.quantity_on_hand || 0} left
+                      <span style={{ display: 'block', fontWeight: 700, fontSize: 'var(--font-size-xs)', color: 'var(--color-danger-text)', fontFamily: 'var(--font-mono)' }}>
+                        {item.quantity_available !== undefined ? item.quantity_available : item.quantity_on_hand || 0} units
                       </span>
                       <span style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>
-                        Min: {item.safety_stock || item.reorder_point || 10}
+                        Safety: {item.safety_stock || item.reorder_point || 10}
                       </span>
                     </div>
                     <Button
-                      variant="danger"
+                      variant="outline"
                       size="sm"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -483,8 +516,8 @@ export function DashboardPage() {
               ))}
             </div>
           ) : (
-            <div style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--color-success)', fontSize: 'var(--font-size-xs)' }}>
-              All inventory levels are currently above safe operational thresholds.
+            <div style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--color-success-text)', fontSize: 'var(--font-size-xs)' }}>
+              All inventory items are currently above safe operational thresholds.
             </div>
           )}
         </Card>

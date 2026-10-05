@@ -1,7 +1,8 @@
 import React from 'react';
 
 /**
- * Reusable Button Component
+ * Enterprise Button Component
+ * Polished, high-contrast, crisp borders, subtle hover transitions
  */
 export function Button({
   children,
@@ -15,39 +16,42 @@ export function Button({
   onClick,
   type = 'button',
   className = '',
+  style = {},
   ...props
 }) {
   const baseStyles = {
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: '0.5rem',
+    gap: '0.45rem',
     fontWeight: 500,
     borderRadius: 'var(--radius-md)',
     transition: 'all var(--transition-fast)',
     cursor: disabled || loading ? 'not-allowed' : 'pointer',
-    opacity: disabled || loading ? 0.6 : 1,
+    opacity: disabled || loading ? 0.5 : 1,
     width: fullWidth ? '100%' : 'auto',
     fontFamily: 'inherit',
     border: '1px solid transparent',
     outline: 'none',
-    userSelect: 'none'
+    userSelect: 'none',
+    lineHeight: 1.2
   };
 
   const sizeStyles = {
-    sm: { padding: '0.375rem 0.75rem', fontSize: 'var(--font-size-xs)' },
-    md: { padding: '0.5rem 1rem', fontSize: 'var(--font-size-sm)' },
-    lg: { padding: '0.75rem 1.5rem', fontSize: 'var(--font-size-base)' }
+    sm: { padding: '0.35rem 0.65rem', fontSize: '11px', iconSize: 13 },
+    md: { padding: '0.45rem 0.85rem', fontSize: 'var(--font-size-xs)', iconSize: 14 },
+    lg: { padding: '0.65rem 1.15rem', fontSize: 'var(--font-size-sm)', iconSize: 16 }
   };
 
   const variantStyles = {
     primary: {
-      backgroundColor: 'var(--color-primary)',
-      color: '#ffffff',
-      borderColor: 'var(--color-primary)'
+      backgroundColor: 'var(--color-text-primary)',
+      color: 'var(--color-bg-primary)',
+      borderColor: 'var(--color-text-primary)',
+      fontWeight: 600
     },
     secondary: {
-      backgroundColor: 'var(--color-bg-active)',
+      backgroundColor: 'var(--color-bg-tertiary)',
       color: 'var(--color-text-primary)',
       borderColor: 'var(--color-border-default)'
     },
@@ -57,9 +61,10 @@ export function Button({
       borderColor: 'var(--color-border-strong)'
     },
     danger: {
-      backgroundColor: 'var(--color-danger)',
-      color: '#ffffff',
-      borderColor: 'var(--color-danger)'
+      backgroundColor: 'var(--color-danger-bg)',
+      color: 'var(--color-danger-text)',
+      borderColor: 'var(--color-danger-border)',
+      fontWeight: 600
     },
     ghost: {
       backgroundColor: 'transparent',
@@ -67,11 +72,15 @@ export function Button({
       borderColor: 'transparent'
     },
     success: {
-      backgroundColor: 'var(--color-success)',
-      color: '#ffffff',
-      borderColor: 'var(--color-success)'
+      backgroundColor: 'var(--color-success-bg)',
+      color: 'var(--color-success-text)',
+      borderColor: 'var(--color-success-border)',
+      fontWeight: 600
     }
   };
+
+  const currentSize = sizeStyles[size] || sizeStyles.md;
+  const currentVariant = variantStyles[variant] || variantStyles.primary;
 
   return (
     <button
@@ -80,8 +89,9 @@ export function Button({
       onClick={onClick}
       style={{
         ...baseStyles,
-        ...sizeStyles[size],
-        ...variantStyles[variant]
+        ...currentSize,
+        ...currentVariant,
+        ...style
       }}
       className={`btn btn-${variant} ${className}`}
       {...props}
@@ -89,8 +99,8 @@ export function Button({
       {loading && (
         <span
           style={{
-            width: '1em',
-            height: '1em',
+            width: '12px',
+            height: '12px',
             border: '2px solid currentColor',
             borderRightColor: 'transparent',
             borderRadius: '50%',
@@ -99,9 +109,9 @@ export function Button({
           className="animate-spin"
         />
       )}
-      {!loading && Icon && iconPosition === 'left' && <Icon size={size === 'sm' ? 14 : size === 'lg' ? 18 : 16} />}
-      <span>{children}</span>
-      {!loading && Icon && iconPosition === 'right' && <Icon size={size === 'sm' ? 14 : size === 'lg' ? 18 : 16} />}
+      {!loading && Icon && iconPosition === 'left' && <Icon size={currentSize.iconSize} />}
+      {children && <span>{children}</span>}
+      {!loading && Icon && iconPosition === 'right' && <Icon size={currentSize.iconSize} />}
     </button>
   );
 }

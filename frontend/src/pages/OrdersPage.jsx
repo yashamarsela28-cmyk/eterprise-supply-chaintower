@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { ShoppingCart, RefreshCw, Plus, CheckCircle, Truck, Package, XCircle, Box, ArrowRight } from 'lucide-react';
 import { useApiQuery } from '../hooks/useApiQuery';
 import { usePagination } from '../hooks/usePagination';
@@ -6,6 +6,7 @@ import * as orderService from '../services/orderService';
 import * as customerService from '../services/customerService';
 import * as warehouseService from '../services/warehouseService';
 import * as productService from '../services/productService';
+import { normalizeList, normalizePagination } from '../utils/responseNormalizer';
 import { useToast } from '../context/ToastContext';
 import { PageHeader } from '../components/common/PageHeader';
 import { FilterBar } from '../components/common/FilterBar';
@@ -17,7 +18,7 @@ import { Button } from '../components/common/Button';
 import { Drawer } from '../components/common/Drawer';
 import { Modal } from '../components/common/Modal';
 import { StatusBadge } from '../components/common/StatusBadge';
-import { formatCurrency, formatDate } from '../utils/formatters';
+import { formatCurrency, formatDate, formatNumber } from '../utils/formatters';
 
 export function OrdersPage() {
   const toast = useToast();
@@ -42,11 +43,39 @@ export function OrdersPage() {
 
   const { page, limit, setPage, setLimit } = usePagination(1, 20);
 
-  const { data, loading, error, refetch } = useApiQuery(
+  const { data: rawData, loading, error, refetch } = useApiQuery(
     orderService.getOrders,
     { page, limit, search, status: statusFilter },
     { immediate: true }
   );
+
+  const orders = useMemo(() => normalizeList(rawData), [rawData]);
+  const pagination = useMemo(() => normalizePagination(rawData, orders, page, limit), [rawData, orders, page, limit]);
+
+  // Compute live summary stats
+  const summaryStats = useMemo(() => {
+    let totalValuation = 0;
+    let pendingCount = 0;
+    let shippedDeliveredCount = 0;
+
+    orders.forEach((o) => {
+      totalValuation += Number(o.total_amount || 0);
+      const st = (o.status || '').toUpperCase();
+      if (st === 'PENDING' || st === 'CONFIRMED' || st === 'ALLOCATED' || st === 'PROCESSING') {
+        pendingCount += 1;
+      }
+      if (st === 'SHIPPED' || st === 'DELIVERED') {
+        shippedDeliveredCount += 1;
+      }
+    });
+
+    return {
+      total: pagination.total || orders.length,
+      activePipeline: pendingCount,
+      fulfilled: shippedDeliveredCount,
+      totalValuation
+    };
+  }, [orders, pagination.total]);
 
   // Fetch lookup data for form
   useEffect(() => {
@@ -56,9 +85,9 @@ export function OrdersPage() {
         warehouseService.getWarehouses({ limit: 50 }).catch(() => ({ data: [] })),
         productService.getProducts({ limit: 50 }).catch(() => ({ data: [] }))
       ]).then(([custRes, whRes, prodRes]) => {
-        const custs = custRes?.data || [];
-        const whs = whRes?.data || [];
-        const prods = prodRes?.data || [];
+        const custs = normalizeList(custRes);
+        const whs = normalizeList(whRes);
+        const prods = normalizeList(prodRes);
         setCustomers(custs);
         setWarehouses(whs);
         setProducts(prods);
@@ -78,9 +107,6 @@ export function OrdersPage() {
     }
   }, [isCreateOpen]);
 
-  const orders = data?.data || [];
-  const pagination = data?.pagination || { total: orders.length, page, limit, totalPages: Math.ceil(orders.length / limit) || 1 };
-
   // Handle Action / Status Transition
   const handleStatusChange = async (targetStatus) => {
     if (!selectedOrder) return;
@@ -97,7 +123,7 @@ export function OrdersPage() {
       } else {
         res = await orderService.updateOrderStatus(orderId, targetStatus);
       }
-      toast.success(`Sales Order updated to ${targetStatus}`);
+      toast.success(`Sales Order #${selectedOrder.order_number || orderId} transitioned to ${targetStatus}`);
       setSelectedOrder(res?.data || { ...selectedOrder, status: targetStatus });
       refetch();
     } catch (err) {
@@ -178,14 +204,14 @@ export function OrdersPage() {
   const columns = [
     {
       key: 'order_number',
-      header: 'Sales Order',
+      header: 'Sales Order Ref',
       render: (r) => (
         <div>
           <div style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
             {r.order_number || `ORD-${r.sales_order_id || r.id}`}
           </div>
-          <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-            Date: {formatDate(r.created_at || r.order_date)}
+          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '0.15rem' }}>
+            Date: <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-secondary)' }}>{formatDate(r.created_at || r.order_date)}</span>
           </div>
         </div>
       )
@@ -193,47 +219,61 @@ export function OrdersPage() {
     {
       key: 'customer',
       header: 'Customer Account',
-      render: (r) => r.customers?.name || r.customer_name || `Customer #${r.customer_id}`
+      render: (r) => (
+        <div>
+          <div style={{ fontWeight: 500, color: 'var(--color-text-primary)' }}>
+            {r.customers?.name || r.customer_name || `Account #${r.customer_id}`}
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+            {r.customers?.code || r.customer_code || 'Standard Terms'}
+          </div>
+        </div>
+      )
     },
     {
       key: 'items_count',
-      header: 'Line Items',
+      header: 'Items',
       align: 'center',
-      render: (r) => `${r.order_items?.length || r.items?.length || 1} items`
+      render: (r) => (
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
+          {r.order_items?.length || r.items?.length || 1} lines
+        </span>
+      )
     },
     {
       key: 'total_amount',
       header: 'Order Total',
       align: 'right',
       render: (r) => (
-        <span style={{ fontWeight: 600 }}>
+        <span style={{ fontWeight: 600, fontFamily: 'var(--font-mono)', color: 'var(--color-text-primary)' }}>
           {formatCurrency(r.total_amount || 0)}
         </span>
       )
     },
     {
       key: 'status',
-      header: 'Fulfillment Status',
-      render: (r) => <StatusBadge status={r.status} />
+      header: 'Fulfillment State',
+      render: (r) => <StatusBadge status={r.status} size="sm" />
     }
   ];
 
   const currentStatus = (selectedOrder?.status || '').toUpperCase();
 
   return (
-    <div className="orders-page">
+    <div className="orders-page animate-fade-in">
       <PageHeader
+        eyebrow="DEMAND // SALES FULFILLMENT"
         title="Sales Orders & Demand Pipeline"
-        description="Customer purchase demands, fulfillment lifecycles, and dispatch commitments."
+        description="Customer purchase orders, allocation lifecycles, and outbound shipment commitments."
         actions={
           <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
             <Button
-              variant="secondary"
+              variant="outline"
               size="sm"
               icon={RefreshCw}
               onClick={refetch}
             >
-              Refresh
+              Refresh Orders
             </Button>
             <Button
               variant="primary"
@@ -247,13 +287,87 @@ export function OrdersPage() {
         }
       />
 
+      {/* KPI Summary Strip */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gap: 'var(--space-3)',
+          marginBottom: 'var(--space-5)'
+        }}
+      >
+        <div
+          style={{
+            padding: '0.85rem 1.15rem',
+            backgroundColor: 'var(--color-bg-card)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)'
+          }}
+        >
+          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Total Sales Orders
+          </span>
+          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
+            {formatNumber(summaryStats.total)}
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: '0.85rem 1.15rem',
+            backgroundColor: 'var(--color-bg-card)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)'
+          }}
+        >
+          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Active Demand Pipeline
+          </span>
+          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-warning-text)', fontFamily: 'var(--font-mono)' }}>
+            {formatNumber(summaryStats.activePipeline)}
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: '0.85rem 1.15rem',
+            backgroundColor: 'var(--color-bg-card)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)'
+          }}
+        >
+          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Dispatched & Delivered
+          </span>
+          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-success-text)', fontFamily: 'var(--font-mono)' }}>
+            {formatNumber(summaryStats.fulfilled)}
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: '0.85rem 1.15rem',
+            backgroundColor: 'var(--color-bg-card)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-lg)'
+          }}
+        >
+          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Pipeline Valuation
+          </span>
+          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
+            {formatCurrency(summaryStats.totalValuation)}
+          </div>
+        </div>
+      </div>
+
       <FilterBar
         search={search}
         onSearchChange={(val) => {
           setSearch(val);
           setPage(1);
         }}
-        searchPlaceholder="Search order number or customer..."
+        searchPlaceholder="Filter by order number, customer, code..."
         hasActiveFilters={Boolean(search || statusFilter)}
         onReset={() => {
           setSearch('');
@@ -286,6 +400,7 @@ export function OrdersPage() {
         loading={loading}
         onRowClick={(ord) => setSelectedOrder(ord)}
         emptyTitle="No Orders Found"
+        emptyMessage="No sales orders matched your search or status criteria."
       />
 
       <Pagination
@@ -302,27 +417,28 @@ export function OrdersPage() {
         isOpen={Boolean(selectedOrder)}
         onClose={() => setSelectedOrder(null)}
         title={selectedOrder?.order_number || `Sales Order #${selectedOrder?.sales_order_id || selectedOrder?.id}`}
-        subtitle={`Customer: ${selectedOrder?.customers?.name || selectedOrder?.customer_name || 'Enterprise Client'}`}
+        subtitle={`Account: ${selectedOrder?.customers?.name || selectedOrder?.customer_name || 'Enterprise Client'}`}
       >
         {selectedOrder && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-            <div style={{ padding: '1rem', backgroundColor: 'rgba(30, 41, 59, 0.4)', borderRadius: 'var(--radius-lg)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>Status</span>
-                <StatusBadge status={selectedOrder.status} />
+            <div style={{ padding: '0.85rem 1rem', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
+                <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Lifecycle Status</span>
+                <StatusBadge status={selectedOrder.status} size="sm" />
               </div>
-              <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)' }}>
-                <strong>Total Amount:</strong> {formatCurrency(selectedOrder.total_amount || 0)}
+              <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)', display: 'flex', justifyContent: 'space-between' }}>
+                <span>Order Total:</span>
+                <strong style={{ color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>{formatCurrency(selectedOrder.total_amount || 0)}</strong>
               </div>
-              <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)', marginTop: '0.25rem' }}>
-                <strong>Shipping Address:</strong> {selectedOrder.shipping_address || 'Standard Delivery Address'}
+              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)', marginTop: '0.4rem', borderTop: '1px solid var(--color-border-subtle)', paddingTop: '0.4rem' }}>
+                <strong style={{ color: 'var(--color-text-muted)' }}>Destination:</strong> {selectedOrder.shipping_address || 'Standard Delivery Address'}
               </div>
             </div>
 
             {/* Workflow Action Buttons */}
-            <div style={{ padding: '1rem', backgroundColor: 'rgba(15, 23, 42, 0.6)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
-              <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '0.75rem', textTransform: 'uppercase' }}>
-                Operational Actions
+            <div style={{ padding: '0.85rem 1rem', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
+              <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--color-text-muted)', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Fulfillment Controls
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
                 {currentStatus === 'PENDING' && (
@@ -409,7 +525,7 @@ export function OrdersPage() {
 
                 {['DELIVERED', 'CANCELLED'].includes(currentStatus) && (
                   <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
-                    This order is terminal ({currentStatus}). No further state transitions allowed.
+                    Order state is terminal ({currentStatus}). No further transitions allowed.
                   </div>
                 )}
               </div>
@@ -418,29 +534,32 @@ export function OrdersPage() {
             {/* Line Items */}
             {selectedOrder.order_items && selectedOrder.order_items.length > 0 && (
               <div>
-                <h4 style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, marginBottom: 'var(--space-2)' }}>Ordered Line Items</h4>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <h4 style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>
+                  Line Items ({selectedOrder.order_items.length})
+                </h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                   {selectedOrder.order_items.map((item, idx) => (
                     <div
                       key={idx}
                       style={{
-                        padding: '0.5rem 0.75rem',
-                        backgroundColor: 'rgba(30, 41, 59, 0.3)',
+                        padding: '0.65rem 0.85rem',
+                        backgroundColor: 'var(--color-bg-secondary)',
                         borderRadius: 'var(--radius-md)',
+                        border: '1px solid var(--color-border-subtle)',
                         display: 'flex',
                         justifyContent: 'space-between',
                         alignItems: 'center'
                       }}
                     >
                       <div>
-                        <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-primary)', fontWeight: 500 }}>
+                        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-primary)', fontWeight: 600 }}>
                           {item.products?.name || item.product_name || `Product #${item.product_id}`}
                         </div>
-                        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-                          Qty: {item.ordered_quantity || item.quantity} • Unit: {formatCurrency(item.unit_price || 0)}
+                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                          Qty: <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-secondary)' }}>{item.ordered_quantity || item.quantity}</span> • Unit: {formatCurrency(item.unit_price || 0)}
                         </div>
                       </div>
-                      <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+                      <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--color-text-primary)' }}>
                         {formatCurrency(item.subtotal || (item.ordered_quantity || item.quantity || 1) * (item.unit_price || 0))}
                       </div>
                     </div>
@@ -456,8 +575,8 @@ export function OrdersPage() {
       <Modal
         isOpen={isCreateOpen}
         onClose={() => !createSubmitting && setIsCreateOpen(false)}
-        title="Create New Sales Order"
-        subtitle="Initiate a demand order with real-time inventory allocation."
+        title="Create Sales Order"
+        subtitle="Initiate customer demand order with automatic stock allocation."
         size="lg"
         footer={
           <>
@@ -473,7 +592,7 @@ export function OrdersPage() {
               loading={createSubmitting}
               onClick={handleCreateSubmit}
             >
-              Create Sales Order
+              Submit Sales Order
             </Button>
           </>
         }
@@ -504,7 +623,7 @@ export function OrdersPage() {
           </div>
 
           <Input
-            label="Shipping Address"
+            label="Shipping Destination Address"
             required
             value={newOrder.shipping_address}
             onChange={(e) => setNewOrder({ ...newOrder, shipping_address: e.target.value })}
@@ -536,9 +655,10 @@ export function OrdersPage() {
                     gridTemplateColumns: '3fr 1.5fr 2fr auto',
                     gap: 'var(--space-2)',
                     alignItems: 'center',
-                    padding: '0.5rem',
-                    backgroundColor: 'rgba(15, 23, 42, 0.4)',
-                    borderRadius: 'var(--radius-md)'
+                    padding: '0.6rem',
+                    backgroundColor: 'var(--color-bg-secondary)',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--color-border-subtle)'
                   }}
                 >
                   <Select
@@ -572,7 +692,7 @@ export function OrdersPage() {
                       type="button"
                       variant="ghost"
                       size="sm"
-                      style={{ color: 'var(--color-danger)' }}
+                      style={{ color: 'var(--color-danger-text)' }}
                       onClick={() => removeItemRow(idx)}
                     >
                       ✕

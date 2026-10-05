@@ -1,15 +1,14 @@
 import React from 'react';
 import { useLocation, Link } from 'react-router-dom';
-import { ChevronRight, Home } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 
 /**
- * Standard Breadcrumbs Component
+ * Editorial Breadcrumbs Component
  */
 export function Breadcrumbs() {
   const location = useLocation();
   const pathnames = location.pathname.split('/').filter((x) => x);
 
-  // Format path segment into human readable text
   const formatSegment = (seg) => {
     return seg
       .replace(/-/g, ' ')
@@ -26,25 +25,23 @@ export function Breadcrumbs() {
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: '0.5rem',
-        fontSize: 'var(--font-size-xs)',
+        gap: '0.35rem',
+        fontSize: '11px',
         color: 'var(--color-text-muted)',
-        marginBottom: 'var(--space-4)'
+        marginBottom: 'var(--space-3)'
       }}
     >
       <Link
         to="/dashboard"
         style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.25rem',
           color: 'var(--color-text-muted)',
           textDecoration: 'none',
           transition: 'color var(--transition-fast)'
         }}
+        onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--color-text-primary)')}
+        onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--color-text-muted)')}
       >
-        <Home size={14} />
-        <span>Control Tower</span>
+        Control Tower
       </Link>
 
       {pathnames.map((segment, index) => {
@@ -53,19 +50,21 @@ export function Breadcrumbs() {
 
         return (
           <React.Fragment key={routeTo}>
-            <ChevronRight size={12} style={{ color: 'var(--color-text-muted)', flexShrink: 0 }} />
+            <ChevronRight size={11} style={{ color: 'var(--color-text-dim)', flexShrink: 0 }} />
             {isLast ? (
-              <span style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>
+              <span style={{ color: 'var(--color-text-primary)', fontWeight: 500 }}>
                 {formatSegment(segment)}
               </span>
             ) : (
               <Link
                 to={routeTo}
                 style={{
-                  color: 'var(--color-text-secondary)',
+                  color: 'var(--color-text-muted)',
                   textDecoration: 'none',
                   transition: 'color var(--transition-fast)'
                 }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--color-text-primary)')}
+                onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--color-text-muted)')}
               >
                 {formatSegment(segment)}
               </Link>
