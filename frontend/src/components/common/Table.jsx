@@ -1,10 +1,11 @@
 import React from 'react';
+import { motion } from 'framer-motion';
 import LoadingState from './LoadingState';
 import EmptyState from './EmptyState';
 
 /**
  * Enterprise Data Table Component
- * High density, crisp borders, sticky header, row hover
+ * High density, crisp borders, sticky header, row hover with animations
  * @param {Array} columns - [{ key, header, render, width, align }]
  * @param {Array} data - Array of row objects
  */

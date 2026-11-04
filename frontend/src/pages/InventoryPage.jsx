@@ -1,10 +1,12 @@
 import React, { useState, useMemo } from 'react';
+import { motion } from 'framer-motion';
 import { Boxes, RefreshCw, PlusCircle, BookmarkPlus, AlertCircle, ShieldAlert } from 'lucide-react';
 import { useApiQuery } from '../hooks/useApiQuery';
 import { usePagination } from '../hooks/usePagination';
 import * as inventoryService from '../services/inventoryService';
 import { useToast } from '../context/ToastContext';
 import { normalizeList, normalizePagination } from '../utils/responseNormalizer';
+import { AnimatedPageWrapper } from '../components/common/AnimatedPageWrapper';
 import { PageHeader } from '../components/common/PageHeader';
 import { FilterBar } from '../components/common/FilterBar';
 import { Table } from '../components/common/Table';

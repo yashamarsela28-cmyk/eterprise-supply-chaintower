@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import {
   TrendingUp,
   Warehouse,
@@ -15,6 +16,7 @@ import {
 import { useApiQuery } from '../hooks/useApiQuery';
 import * as analyticsService from '../services/analyticsService';
 import { normalizeObject, normalizeList } from '../utils/responseNormalizer';
+import { AnimatedPageWrapper } from '../components/common/AnimatedPageWrapper';
 import { PageHeader } from '../components/common/PageHeader';
 import { Tabs } from '../components/common/Tabs';
 import { Card } from '../components/common/Card';

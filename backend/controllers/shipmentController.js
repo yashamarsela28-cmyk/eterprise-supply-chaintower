@@ -7,6 +7,7 @@ const {
     addTrackingEvent
 } = require("../services/shipmentService");
 const { parsePagination, buildPaginationMeta, parseStatus, parseSearch } = require("../utils/queryHelpers");
+const { getWarehouseCoordinates, getDestinationCoordinates, buildRouteGeometry } = require("../services/geocodingService");
 
 /**
  * GET /api/shipments
@@ -213,11 +214,107 @@ async function addTracking(req, res) {
     }
 }
 
+/**
+ * GET /api/shipments/map-data
+ * Returns shipment data optimized for map visualization with geocoded coordinates
+ */
+async function getMapData(req, res) {
+    try {
+        const { status, search } = req.query;
+        const options = { status, search };
+
+        const result = await getShipments(options);
+        const shipments = result.items || [];
+
+        // Geocode origins and destinations in parallel
+        const mapShipments = await Promise.all(
+            shipments.map(async (shipment) => {
+                try {
+                    // Get warehouse (origin) coordinates
+                    const warehouse = shipment.warehouses || {};
+                    const originCoords = await getWarehouseCoordinates(warehouse);
+
+                    // Get destination coordinates
+                    const destCoords = await getDestinationCoordinates(
+                        shipment.destination_address,
+                        '',
+                        ''
+                    );
+
+                    if (originCoords && destCoords) {
+                        return {
+                            shipment_id: shipment.shipment_id,
+                            tracking_number: shipment.tracking_number,
+                            status: shipment.status,
+                            carrier_name: shipment.carrier_name,
+                            shipping_method: shipment.shipping_method,
+                            estimated_delivery_date: shipment.estimated_delivery_date,
+                            origin: {
+                                warehouse_id: warehouse.warehouse_id,
+                                warehouse_name: warehouse.warehouse_name,
+                                city: warehouse.city,
+                                country: warehouse.country,
+                                latitude: originCoords.latitude,
+                                longitude: originCoords.longitude
+                            },
+                            destination: {
+                                address: shipment.destination_address,
+                                latitude: destCoords.latitude,
+                                longitude: destCoords.longitude
+                            },
+                            route: buildRouteGeometry(
+                                originCoords.latitude,
+                                originCoords.longitude,
+                                destCoords.latitude,
+                                destCoords.longitude
+                            ),
+                            tracking_events: shipment.tracking_events || []
+                        };
+                    }
+                    return null;
+                } catch (err) {
+                    console.error(`Geocoding error for shipment ${shipment.shipment_id}:`, err.message);
+                    return null;
+                }
+            })
+        );
+
+        // Filter out failed geocodings
+        const validMapShipments = mapShipments.filter(Boolean);
+
+        // Extract unique warehouses
+        const warehouseSet = new Map();
+        validMapShipments.forEach(s => {
+            if (s.origin) {
+                const key = s.origin.warehouse_id;
+                warehouseSet.set(key, s.origin);
+            }
+        });
+
+        res.json({
+            success: true,
+            count: validMapShipments.length,
+            data: {
+                shipments: validMapShipments,
+                warehouses: Array.from(warehouseSet.values())
+            }
+        });
+    } catch (err) {
+        console.error("Map data endpoint error:", err.message);
+        res.status(500).json({
+            success: false,
+            message: "Failed to fetch map data"
+        });
+    }
+}
+
 module.exports = {
     getAllShipments,
     getShipmentById: getShipment,
     getShipmentTracking: getTracking,
     createNewShipment,
     changeShipmentStatus,
-    addTracking
+    addTracking,
+    getMapData
+
 };

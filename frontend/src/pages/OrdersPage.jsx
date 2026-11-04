@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { motion } from 'framer-motion';
 import { ShoppingCart, RefreshCw, Plus, CheckCircle, Truck, Package, XCircle, Box, ArrowRight } from 'lucide-react';
 import { useApiQuery } from '../hooks/useApiQuery';
 import { usePagination } from '../hooks/usePagination';
@@ -8,6 +9,7 @@ import * as warehouseService from '../services/warehouseService';
 import * as productService from '../services/productService';
 import { normalizeList, normalizePagination } from '../utils/responseNormalizer';
 import { useToast } from '../context/ToastContext';
+import { AnimatedPageWrapper } from '../components/common/AnimatedPageWrapper';
 import { PageHeader } from '../components/common/PageHeader';
 import { FilterBar } from '../components/common/FilterBar';
 import { Table } from '../components/common/Table';

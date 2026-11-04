@@ -1,9 +1,10 @@
 import React, { useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { X } from 'lucide-react';
 import IconButton from './IconButton';
 
 /**
- * Enterprise Modal Dialog
+ * Enterprise Modal Dialog with Framer Motion animations
  */
 export function Modal({
   isOpen = false,
@@ -41,45 +42,57 @@ export function Modal({
   };
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.82)',
-        backdropFilter: 'blur(6px)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 'var(--z-modal)',
-        padding: 'var(--space-4)',
-        animation: 'fadeIn 0.15s ease-out'
-      }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget && onClose) {
-          onClose();
-        }
-      }}
-    >
-      <div
-        style={{
-          width: '100%',
-          maxWidth: widthMap[size] || widthMap.md,
-          maxHeight: '90vh',
-          backgroundColor: 'var(--color-bg-card)',
-          border: '1px solid var(--color-border-strong)',
-          borderRadius: 'var(--radius-xl)',
-          boxShadow: 'var(--shadow-modal)',
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden'
-        }}
-        className={`modal-container ${className}`}
-        role="dialog"
-        aria-modal="true"
-      >
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.82)',
+            backdropFilter: 'blur(6px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 'var(--z-modal)',
+            padding: 'var(--space-4)'
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && onClose) {
+              onClose();
+            }
+          }}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            transition={{
+              duration: 0.25,
+              ease: [0.19, 1, 0.22, 1]
+            }}
+            style={{
+              width: '100%',
+              maxWidth: widthMap[size] || widthMap.md,
+              maxHeight: '90vh',
+              backgroundColor: 'var(--color-bg-card)',
+              border: '1px solid var(--color-border-strong)',
+              borderRadius: 'var(--radius-xl)',
+              boxShadow: 'var(--shadow-modal)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden'
+            }}
+            className={`modal-container ${className}`}
+            role="dialog"
+            aria-modal="true"
+          >
         {/* Header */}
         <div
           style={{
@@ -153,8 +166,10 @@ export function Modal({
             {footer}
           </div>
         )}
-      </div>
-    </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
 

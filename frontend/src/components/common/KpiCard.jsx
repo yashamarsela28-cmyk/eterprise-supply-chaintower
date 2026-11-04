@@ -65,8 +65,27 @@ export function KpiCard({
       className={`kpi-card ${className}`}
       style={{
         cursor: onClick ? 'pointer' : 'default',
-        transition: 'all var(--transition-fast)',
-        position: 'relative'
+        transition: 'all var(--transition-normal)',
+        position: 'relative',
+        background: onClick ? 'var(--gradient-subtle)' : undefined,
+        ...(onClick && {
+          ':hover': {
+            transform: 'translateY(-2px)',
+            boxShadow: 'var(--shadow-card-hover)'
+          }
+        })
+      }}
+      onMouseEnter={(e) => {
+        if (onClick) {
+          e.currentTarget.style.transform = 'translateY(-2px)';
+          e.currentTarget.style.boxShadow = 'var(--shadow-card-hover)';
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (onClick) {
+          e.currentTarget.style.transform = 'translateY(0)';
+          e.currentTarget.style.boxShadow = 'var(--shadow-card)';
+        }
       }}
       onClick={onClick}
       {...props}
@@ -99,7 +118,8 @@ export function KpiCard({
               color: 'var(--color-text-primary)',
               lineHeight: 1.15,
               fontFamily: 'var(--font-mono)',
-              letterSpacing: '-0.02em'
+              letterSpacing: '-0.02em',
+              animation: loading ? 'none' : 'countUp 0.4s var(--ease-out-expo)'
             }}
           >
             {loading ? (
@@ -157,10 +177,11 @@ export function KpiCard({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              flexShrink: 0
+              flexShrink: 0,
+              transition: 'all var(--transition-normal)'
             }}
           >
-            <Icon size={18} />
+            <Icon size={18} style={{ transition: 'transform var(--transition-normal)' }} />
           </div>
         )}
       </div>

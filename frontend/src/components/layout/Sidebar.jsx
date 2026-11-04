@@ -68,9 +68,22 @@ export function Sidebar({ isOpen = true, onCloseMobile }) {
                       backgroundColor: isActive ? 'var(--color-bg-tertiary)' : 'transparent',
                       borderLeft: isActive ? '2px solid var(--color-text-primary)' : '2px solid transparent',
                       textDecoration: 'none',
-                      transition: 'all var(--transition-fast)',
-                      position: 'relative'
+                      transition: 'all var(--transition-normal)',
+                      position: 'relative',
+                      boxShadow: isActive ? 'var(--shadow-sm)' : 'none'
                     })}
+                    onMouseEnter={(e) => {
+                      if (!e.currentTarget.classList.contains('active')) {
+                        e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
+                        e.currentTarget.style.transform = 'translateX(2px)';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!e.currentTarget.classList.contains('active')) {
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                        e.currentTarget.style.transform = 'translateX(0)';
+                      }
+                    }}
                     title={!isOpen ? item.title : undefined}
                   >
                     {Icon && (

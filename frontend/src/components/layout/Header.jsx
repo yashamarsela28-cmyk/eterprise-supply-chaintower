@@ -125,7 +125,7 @@ export function Header({ onToggleSidebar, isSidebarOpen }) {
     <header
       style={{
         height: 'var(--header-height)',
-        backgroundColor: 'var(--color-bg-secondary)',
+        backgroundColor: 'var(--glass-bg)',
         borderBottom: '1px solid var(--color-border-subtle)',
         display: 'flex',
         alignItems: 'center',
@@ -134,8 +134,10 @@ export function Header({ onToggleSidebar, isSidebarOpen }) {
         position: 'sticky',
         top: 0,
         zIndex: 'var(--z-header)',
-        backdropFilter: 'blur(12px)'
+        backdropFilter: 'var(--glass-blur)',
+        transition: 'all var(--transition-normal)'
       }}
+      className="app-header"
     >
       {/* Left: Brand Identity & Sidebar Toggle */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
@@ -231,7 +233,8 @@ export function Header({ onToggleSidebar, isSidebarOpen }) {
             borderRadius: 'var(--radius-md)',
             padding: '0.35rem 0.65rem',
             gap: '0.5rem',
-            transition: 'border-color var(--transition-fast)'
+            transition: 'all var(--transition-fast)',
+            boxShadow: isSearchOpen ? 'var(--shadow-glow)' : 'none'
           }}
         >
           <Search size={14} style={{ color: 'var(--color-text-muted)' }} />
@@ -289,14 +292,16 @@ export function Header({ onToggleSidebar, isSidebarOpen }) {
               top: 'calc(100% + 6px)',
               left: 0,
               right: 0,
-              backgroundColor: 'var(--color-bg-secondary)',
+              backgroundColor: 'var(--glass-bg)',
+              backdropFilter: 'var(--glass-blur)',
               border: '1px solid var(--color-border-strong)',
               borderRadius: 'var(--radius-lg)',
               boxShadow: 'var(--shadow-lg)',
               maxHeight: '320px',
               overflowY: 'auto',
               zIndex: 'var(--z-modal)',
-              padding: '0.35rem'
+              padding: '0.35rem',
+              animation: 'fadeInUp 0.2s var(--ease-out-expo)'
             }}
           >
             <div
@@ -388,12 +393,14 @@ export function Header({ onToggleSidebar, isSidebarOpen }) {
                 top: 'calc(100% + 8px)',
                 right: 0,
                 width: '320px',
-                backgroundColor: 'var(--color-bg-secondary)',
+                backgroundColor: 'var(--glass-bg)',
+                backdropFilter: 'var(--glass-blur)',
                 border: '1px solid var(--color-border-strong)',
                 borderRadius: 'var(--radius-lg)',
                 boxShadow: 'var(--shadow-lg)',
                 zIndex: 'var(--z-modal)',
-                overflow: 'hidden'
+                overflow: 'hidden',
+                animation: 'fadeInUp 0.2s var(--ease-out-expo)'
               }}
             >
               <div
