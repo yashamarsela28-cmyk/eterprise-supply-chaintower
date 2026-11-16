@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Map as MapLibreMap, LngLatBounds } from 'maplibre-gl';
+import { Map as MapLibreMap, LngLatBounds, setWorkerUrl } from 'maplibre-gl';
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {
   Search, RefreshCw, Truck, Plane, Ship, TrainFront, MapPin, X,
@@ -11,6 +12,11 @@ import * as shipmentService from '../services/shipmentService';
 import { StatusBadge } from '../components/common/StatusBadge';
 import { formatCurrency, formatDate, formatDateTime, formatNumber } from '../utils/formatters';
 import { EASE, popIn } from '../utils/motion';
+
+// MapLibre 6 derives its worker URL from import.meta.url, which Vite cannot see
+// at build time. Importing the worker explicitly emits it as a hashed asset and
+// points MapLibre at that real file instead of a non-existent sibling URL.
+setWorkerUrl(maplibreWorkerUrl);
 
 const DARK_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
 
