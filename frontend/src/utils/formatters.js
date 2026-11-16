@@ -99,8 +99,13 @@ export function getStatusVariant(status) {
     return 'success';
   }
 
+  // In-motion states read as information, not alerts
+  if (['IN_TRANSIT', 'OUT_FOR_DELIVERY', 'SHIPPED', 'PICKED_UP', 'DISPATCHED'].includes(s)) {
+    return 'info';
+  }
+
   // Warning states
-  if (['PENDING', 'PROCESSING', 'IN_TRANSIT', 'PARTIALLY_RECEIVED', 'PARTIALLY_PAID', 'LOW_STOCK', 'IN_INSPECTION'].includes(s)) {
+  if (['PENDING', 'PROCESSING', 'READY', 'PARTIALLY_RECEIVED', 'PARTIALLY_PAID', 'LOW_STOCK', 'IN_INSPECTION', 'REQUESTED', 'SUBMITTED'].includes(s)) {
     return 'warning';
   }
 
@@ -109,9 +114,13 @@ export function getStatusVariant(status) {
     return 'danger';
   }
 
-  // Info / Specialized states
-  if (['CREATED', 'ORDERED', 'SHIPPED', 'REQUESTED'].includes(s)) {
-    return 'info';
+  // Neutral intake states
+  if (['CREATED', 'DRAFT', 'ORDERED'].includes(s)) {
+    return 'neutral';
+  }
+
+  if (['RETURNED', 'REFUNDED'].includes(s)) {
+    return 'purple';
   }
 
   return 'neutral';

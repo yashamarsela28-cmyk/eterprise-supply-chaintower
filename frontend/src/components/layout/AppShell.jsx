@@ -1,53 +1,43 @@
-import React, { useState } from 'react';
-import { Outlet } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { Outlet, useLocation } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import Header from './Header';
 import Sidebar from './Sidebar';
-import Breadcrumbs from './Breadcrumbs';
 
 /**
- * Enterprise Application Shell
- * Desktop-first, refined padding, maximum workspace utilization
+ * Application shell.
+ * The Transport workspace is intentionally full-bleed; every other module
+ * occupies the padded operational canvas.
  */
 export function AppShell() {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const location = useLocation();
+  const [mobileNav, setMobileNav] = useState(false);
+  const fullBleed = location.pathname === '/shipments';
 
-  const toggleSidebar = () => {
-    setSidebarOpen((prev) => !prev);
-  };
+  useEffect(() => {
+    setMobileNav(false);
+  }, [location.pathname]);
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        minHeight: '100vh',
-        backgroundColor: 'var(--color-bg-primary)',
-        color: 'var(--color-text-primary)'
-      }}
-      className="app-shell"
-    >
-      {/* Top Navigation Bar */}
-      <Header onToggleSidebar={toggleSidebar} isSidebarOpen={sidebarOpen} />
+    <div className="app-shell">
+      <Header onToggleSidebar={() => setMobileNav((v) => !v)} />
+      <div className="app-body">
+        <Sidebar isOpen={mobileNav} isMobile onCloseMobile={() => setMobileNav(false)} />
+        {mobileNav && <div className="rail-scrim" onClick={() => setMobileNav(false)} />}
 
-      {/* Main Workspace */}
-      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-        {/* Sidebar */}
-        <Sidebar isOpen={sidebarOpen} onCloseMobile={() => {}} />
-
-        {/* Dynamic Page Content Area */}
-        <main
-          style={{
-            flex: 1,
-            padding: 'var(--space-6)',
-            overflowY: 'auto',
-            minWidth: 0,
-            maxWidth: '1600px',
-            margin: '0 auto',
-            width: '100%'
-          }}
-        >
-          <Breadcrumbs />
-          <Outlet />
+        <main className={`app-main${fullBleed ? ' full-bleed' : ''}`}>
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={location.pathname}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+              style={{ minHeight: fullBleed ? '100%' : undefined }}
+            >
+              <Outlet />
+            </motion.div>
+          </AnimatePresence>
         </main>
       </div>
     </div>

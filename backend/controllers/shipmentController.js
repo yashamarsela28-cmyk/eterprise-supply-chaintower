@@ -216,86 +216,140 @@ async function addTracking(req, res) {
 
 /**
  * GET /api/shipments/map-data
- * Returns shipment data optimized for map visualization with geocoded coordinates
+ * Returns every shipment with geospatial context. Records whose origin or
+ * destination cannot be resolved are returned with a null coordinate rather
+ * than being dropped or placed at an invented location.
  */
 async function getMapData(req, res) {
     try {
         const { status, search } = req.query;
-        const options = { status, search };
+        const options = {};
+        if (status) options.status = status;
+        if (search) options.search = search;
 
         const result = await getShipments(options);
         const shipments = result.items || [];
 
-        // Geocode origins and destinations in parallel
+        const warehouseCache = new Map();
+        const resolveWarehouse = async (warehouse) => {
+            if (!warehouse || !warehouse.warehouse_code) return null;
+            if (warehouseCache.has(warehouse.warehouse_code)) return warehouseCache.get(warehouse.warehouse_code);
+            const coords = await getWarehouseCoordinates({
+                address: '',
+                city: warehouse.warehouse_name
+                    ? warehouse.warehouse_name.split(' ')[0]
+                    : '',
+                country: 'India'
+            });
+            const resolved = coords
+                ? {
+                    warehouse_id: warehouse.warehouse_id,
+                    warehouse_code: warehouse.warehouse_code,
+                    warehouse_name: warehouse.warehouse_name,
+                    city: warehouse.warehouse_name ? warehouse.warehouse_name.split(' ')[0] : null,
+                    country: 'India',
+                    latitude: coords.latitude,
+                    longitude: coords.longitude,
+                    precision: coords.precision,
+                    label: coords.label
+                }
+                : null;
+            warehouseCache.set(warehouse.warehouse_code, resolved);
+            return resolved;
+        };
+
         const mapShipments = await Promise.all(
             shipments.map(async (shipment) => {
-                try {
-                    // Get warehouse (origin) coordinates
-                    const warehouse = shipment.warehouses || {};
-                    const originCoords = await getWarehouseCoordinates(warehouse);
+                const warehouseRef = {
+                    warehouse_id: shipment.source_warehouse_id,
+                    warehouse_code: shipment.warehouse_code,
+                    warehouse_name: shipment.warehouse_name
+                };
 
-                    // Get destination coordinates
-                    const destCoords = await getDestinationCoordinates(
-                        shipment.destination_address,
-                        '',
-                        ''
-                    );
+                const destCoords = await getDestinationCoordinates(
+                    shipment.destination_address,
+                    '',
+                    'India'
+                );
 
-                    if (originCoords && destCoords) {
-                        return {
-                            shipment_id: shipment.shipment_id,
-                            tracking_number: shipment.tracking_number,
-                            status: shipment.status,
-                            carrier_name: shipment.carrier_name,
-                            shipping_method: shipment.shipping_method,
-                            estimated_delivery_date: shipment.estimated_delivery_date,
-                            origin: {
-                                warehouse_id: warehouse.warehouse_id,
-                                warehouse_name: warehouse.warehouse_name,
-                                city: warehouse.city,
-                                country: warehouse.country,
-                                latitude: originCoords.latitude,
-                                longitude: originCoords.longitude
-                            },
-                            destination: {
-                                address: shipment.destination_address,
-                                latitude: destCoords.latitude,
-                                longitude: destCoords.longitude
-                            },
-                            route: buildRouteGeometry(
-                                originCoords.latitude,
-                                originCoords.longitude,
-                                destCoords.latitude,
-                                destCoords.longitude
-                            ),
-                            tracking_events: shipment.tracking_events || []
-                        };
+                // Origin city is embedded in the warehouse name (e.g. "Mumbai Central...").
+                const origin = await resolveWarehouse(warehouseRef);
+
+                const destination = destCoords
+                    ? {
+                        address: shipment.destination_address,
+                        label: destCoords.label,
+                        latitude: destCoords.latitude,
+                        longitude: destCoords.longitude,
+                        precision: destCoords.precision
                     }
-                    return null;
-                } catch (err) {
-                    console.error(`Geocoding error for shipment ${shipment.shipment_id}:`, err.message);
-                    return null;
-                }
+                    : {
+                        address: shipment.destination_address,
+                        label: null,
+                        latitude: null,
+                        longitude: null,
+                        precision: 'unavailable'
+                    };
+
+                const route =
+                    origin && destination.latitude !== null
+                        ? buildRouteGeometry(
+                            origin.latitude,
+                            origin.longitude,
+                            destination.latitude,
+                            destination.longitude
+                        )
+                        : null;
+
+                const events = shipment.tracking_events || [];
+                const shippedAt = shipment.shipped_at ? new Date(shipment.shipped_at).getTime() : null;
+                const eta = shipment.estimated_delivery_date ? new Date(shipment.estimated_delivery_date).getTime() : null;
+                const now = Date.now();
+                const progress =
+                    shipment.status === 'DELIVERED'
+                        ? 100
+                        : shippedAt && eta && eta > shippedAt
+                            ? Math.max(0, Math.min(99, Math.round(((now - shippedAt) / (eta - shippedAt)) * 100)))
+                            : shipment.status === 'IN_TRANSIT'
+                                ? 55
+                                : 0;
+
+                return {
+                    shipment_id: shipment.shipment_id,
+                    shipment_number: shipment.shipment_number,
+                    tracking_number: shipment.tracking_number,
+                    status: shipment.status,
+                    carrier_name: shipment.carrier_name,
+                    shipping_method: shipment.shipping_method,
+                    shipping_cost: shipment.shipping_cost,
+                    customer_name: shipment.customer_name,
+                    order_number: shipment.order_number,
+                    vehicle_number: shipment.vehicle_number,
+                    vehicle_type: shipment.vehicle_type,
+                    driver_code: shipment.driver_code,
+                    shipped_at: shipment.shipped_at,
+                    estimated_delivery_date: shipment.estimated_delivery_date,
+                    actual_delivery_date: shipment.actual_delivery_date,
+                    origin,
+                    destination,
+                    route,
+                    progress,
+                    event_count: events.length,
+                    tracking_events: events
+                };
             })
         );
 
-        // Filter out failed geocodings
-        const validMapShipments = mapShipments.filter(Boolean);
-
-        // Extract unique warehouses
         const warehouseSet = new Map();
-        validMapShipments.forEach(s => {
-            if (s.origin) {
-                const key = s.origin.warehouse_id;
-                warehouseSet.set(key, s.origin);
-            }
+        mapShipments.forEach((s) => {
+            if (s.origin) warehouseSet.set(s.origin.warehouse_id, s.origin);
         });
 
         res.json({
             success: true,
-            count: validMapShipments.length,
+            count: mapShipments.length,
             data: {
-                shipments: validMapShipments,
+                shipments: mapShipments,
                 warehouses: Array.from(warehouseSet.values())
             }
         });

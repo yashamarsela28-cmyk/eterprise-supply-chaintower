@@ -1,631 +1,280 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { ArrowLeftRight, RefreshCw, Plus, CheckCircle, Truck, PackageCheck, XCircle } from 'lucide-react';
-import { useApiQuery } from '../hooks/useApiQuery';
-import { usePagination } from '../hooks/usePagination';
+import React, { useEffect, useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
+import { RefreshCw, Search, X, Plus, ArrowRight, CheckCircle, Truck, PackageCheck, XCircle, ArrowLeftRight } from 'lucide-react';
 import * as transferService from '../services/transferService';
 import * as warehouseService from '../services/warehouseService';
 import * as productService from '../services/productService';
-import { normalizeList, normalizePagination } from '../utils/responseNormalizer';
+import { normalizeList } from '../utils/responseNormalizer';
 import { useToast } from '../context/ToastContext';
 import { PageHeader } from '../components/common/PageHeader';
-import { FilterBar } from '../components/common/FilterBar';
-import { Table } from '../components/common/Table';
-import { Pagination } from '../components/common/Pagination';
-import { Select } from '../components/common/Select';
-import { Input } from '../components/common/Input';
-import { Button } from '../components/common/Button';
+import { Panel, PanelBody, Stat, StatGrid } from '../components/common/Panel';
+import { StatusBadge } from '../components/common/StatusBadge';
 import { Drawer } from '../components/common/Drawer';
 import { Modal } from '../components/common/Modal';
-import { StatusBadge } from '../components/common/StatusBadge';
+import { Button } from '../components/common/Button';
+import { Input } from '../components/common/Input';
+import { Select } from '../components/common/Select';
 import { formatDate, formatNumber } from '../utils/formatters';
+import { pageStagger, riseIn } from '../utils/motion';
 
 export function TransfersPage() {
   const toast = useToast();
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [selectedTransfer, setSelectedTransfer] = useState(null);
-  const [actionLoading, setActionLoading] = useState(false);
+  const [status, setStatus] = useState('');
+  const [selected, setSelected] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [lookups, setLookups] = useState({ warehouses: [], products: [] });
+  const [form, setForm] = useState({ source_warehouse_id: '', destination_warehouse_id: '', notes: '', items: [] });
+  const [submitting, setSubmitting] = useState(false);
 
-  // Create Transfer Modal
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [createSubmitting, setCreateSubmitting] = useState(false);
-  const [warehouses, setWarehouses] = useState([]);
-  const [products, setProducts] = useState([]);
+  const load = () => {
+    setLoading(true); setError(null);
+    transferService.getTransfers({ limit: 200 })
+      .then((res) => { setRows(normalizeList(res)); setLoading(false); })
+      .catch((e) => { setError(e?.message || 'Transfer service unavailable.'); setLoading(false); });
+  };
+  useEffect(load, []);
 
-  const [newTransfer, setNewTransfer] = useState({
-    source_warehouse_id: '',
-    destination_warehouse_id: '',
-    items: [{ product_id: '', requested_quantity: 10 }]
-  });
+  const openCreate = async () => {
+    setCreateOpen(true);
+    if (!lookups.warehouses.length) {
+      try {
+        const [w, p] = await Promise.all([warehouseService.getWarehouses(), productService.getProducts({ limit: 100 })]);
+        const next = { warehouses: normalizeList(w), products: normalizeList(p) };
+        setLookups(next);
+        const prod = next.products[0] || {};
+        setForm({
+          source_warehouse_id: next.warehouses[0]?.warehouse_id || '',
+          destination_warehouse_id: next.warehouses[1]?.warehouse_id || '',
+          notes: '',
+          items: prod.product_id ? [{ product_id: prod.product_id, requested_quantity: 10 }] : []
+        });
+      } catch (e) { toast.error(e?.message || 'Could not load transfer references.'); }
+    }
+  };
 
-  const { page, limit, setPage, setLimit } = usePagination(1, 20);
+  const filtered = useMemo(() => rows.filter((r) => {
+    const q = search.trim().toLowerCase();
+    const match = !q || [r.transfer_number, r.source_warehouse_name, r.destination_warehouse_name].some((v) => String(v || '').toLowerCase().includes(q));
+    return match && (!status || r.status === status);
+  }), [rows, search, status]);
 
-  const { data: rawData, loading, error, refetch } = useApiQuery(
-    transferService.getTransfers,
-    { page, limit, search, status: statusFilter },
-    { immediate: true }
-  );
+  const stats = useMemo(() => filtered.reduce((a, r) => {
+    a.units += (r.items || []).reduce((s, i) => s + Number(i.requested_quantity || 0), 0);
+    if (r.status === 'IN_TRANSIT') a.transit += 1;
+    if (r.status === 'COMPLETED') a.done += 1;
+    return a;
+  }, { units: 0, transit: 0, done: 0 }), [filtered]);
 
-  const transfers = useMemo(() => normalizeList(rawData), [rawData]);
-  const pagination = useMemo(() => normalizePagination(rawData, transfers, page, limit), [rawData, transfers, page, limit]);
+  const act = async (fn, label) => {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      await fn(selected.transfer_id);
+      toast.success(`${selected.transfer_number} → ${label}`);
+      setSelected(null); load();
+    } catch (e) { toast.error(e?.message || 'Transfer action failed.'); }
+    finally { setBusy(false); }
+  };
 
-  // Compute live summary stats
-  const summaryStats = useMemo(() => {
-    let pendingCount = 0;
-    let inTransitCount = 0;
-    let completedCount = 0;
-
-    transfers.forEach((t) => {
-      const st = (t.status || '').toUpperCase();
-      if (st === 'REQUESTED' || st === 'PENDING' || st === 'APPROVED') pendingCount += 1;
-      if (st === 'IN_TRANSIT') inTransitCount += 1;
-      if (st === 'COMPLETED') completedCount += 1;
-    });
-
-    return {
-      total: pagination.total || transfers.length,
-      pending: pendingCount,
-      inTransit: inTransitCount,
-      completed: completedCount
-    };
-  }, [transfers, pagination.total]);
-
-  useEffect(() => {
-    if (isCreateOpen) {
-      Promise.all([
-        warehouseService.getWarehouses({ limit: 50 }).catch(() => ({ data: [] })),
-        productService.getProducts({ limit: 50 }).catch(() => ({ data: [] }))
-      ]).then(([whRes, prodRes]) => {
-        const whs = normalizeList(whRes);
-        const prods = normalizeList(prodRes);
-        setWarehouses(whs);
-        setProducts(prods);
-
-        setNewTransfer((prev) => ({
-          ...prev,
-          source_warehouse_id: prev.source_warehouse_id || (whs[0]?.warehouse_id || whs[0]?.id || 1),
-          destination_warehouse_id: prev.destination_warehouse_id || (whs[1]?.warehouse_id || whs[1]?.id || 2),
-          items: prev.items.map((item) => ({
-            ...item,
-            product_id: item.product_id || (prods[0]?.product_id || prods[0]?.id || 1)
-          }))
-        }));
+  const submit = async () => {
+    if (!form.source_warehouse_id || !form.destination_warehouse_id || !form.items.length) {
+      toast.error('Source, destination and at least one item are required.');
+      return;
+    }
+    if (String(form.source_warehouse_id) === String(form.destination_warehouse_id)) {
+      toast.error('Source and destination must differ.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await transferService.createTransfer({
+        source_warehouse_id: Number(form.source_warehouse_id),
+        destination_warehouse_id: Number(form.destination_warehouse_id),
+        notes: form.notes,
+        items: form.items.map((i) => ({ product_id: Number(i.product_id), requested_quantity: Number(i.requested_quantity) }))
       });
-    }
-  }, [isCreateOpen]);
-
-  // Status Action Handler
-  const handleAction = async (actionType) => {
-    if (!selectedTransfer) return;
-    const transferId = selectedTransfer.transfer_id || selectedTransfer.id;
-    setActionLoading(true);
-
-    try {
-      let res;
-      if (actionType === 'APPROVE') {
-        res = await transferService.approveTransfer(transferId);
-        toast.success(`Stock Transfer #${selectedTransfer.transfer_number || transferId} approved`);
-      } else if (actionType === 'DISPATCH') {
-        res = await transferService.dispatchTransfer(transferId);
-        toast.success(`Stock Transfer #${selectedTransfer.transfer_number || transferId} dispatched. Source inventory decremented.`);
-      } else if (actionType === 'RECEIVE') {
-        res = await transferService.receiveTransfer(transferId);
-        toast.success(`Stock Transfer #${selectedTransfer.transfer_number || transferId} received. Destination inventory incremented.`);
-      } else if (actionType === 'CANCEL') {
-        res = await transferService.cancelTransfer(transferId);
-        toast.success(`Stock Transfer #${selectedTransfer.transfer_number || transferId} cancelled`);
-      }
-      setSelectedTransfer(res?.data || null);
-      refetch();
-    } catch (err) {
-      toast.error(err.response?.data?.message || err.message || 'Action failed');
-    } finally {
-      setActionLoading(false);
-    }
+      toast.success('Transfer requested.');
+      setCreateOpen(false); load();
+    } catch (e) { toast.error(e?.message || 'Transfer creation failed.'); }
+    finally { setSubmitting(false); }
   };
-
-  const handleCreateSubmit = async (e) => {
-    e.preventDefault();
-    if (!newTransfer.source_warehouse_id || !newTransfer.destination_warehouse_id) {
-      toast.error('Please select both source and destination warehouses');
-      return;
-    }
-    if (String(newTransfer.source_warehouse_id) === String(newTransfer.destination_warehouse_id)) {
-      toast.error('Source and Destination warehouses must be different facilities');
-      return;
-    }
-
-    setCreateSubmitting(true);
-    try {
-      const payload = {
-        source_warehouse_id: Number(newTransfer.source_warehouse_id),
-        destination_warehouse_id: Number(newTransfer.destination_warehouse_id),
-        items: newTransfer.items.map((item) => ({
-          product_id: Number(item.product_id),
-          requested_quantity: Number(item.requested_quantity) || 1
-        }))
-      };
-
-      const res = await transferService.createTransfer(payload);
-      toast.success(`Stock Transfer #${res?.data?.transfer_number || ''} requested successfully`);
-      setIsCreateOpen(false);
-      refetch();
-    } catch (err) {
-      toast.error(err.response?.data?.message || err.message || 'Failed to create stock transfer');
-    } finally {
-      setCreateSubmitting(false);
-    }
-  };
-
-  const addItemRow = () => {
-    const defaultProd = products[0];
-    setNewTransfer((prev) => ({
-      ...prev,
-      items: [
-        ...prev.items,
-        {
-          product_id: defaultProd?.product_id || defaultProd?.id || 1,
-          requested_quantity: 10
-        }
-      ]
-    }));
-  };
-
-  const removeItemRow = (idx) => {
-    setNewTransfer((prev) => ({
-      ...prev,
-      items: prev.items.filter((_, i) => i !== idx)
-    }));
-  };
-
-  const updateItemRow = (idx, field, value) => {
-    setNewTransfer((prev) => {
-      const items = [...prev.items];
-      items[idx] = { ...items[idx], [field]: value };
-      return { ...prev, items };
-    });
-  };
-
-  const columns = [
-    {
-      key: 'transfer_number',
-      header: 'Transfer Reference',
-      render: (r) => (
-        <div>
-          <div style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
-            {r.transfer_number || `TRF-${r.transfer_id || r.id}`}
-          </div>
-          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '0.15rem' }}>
-            Created: <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-secondary)' }}>{formatDate(r.created_at)}</span>
-          </div>
-        </div>
-      )
-    },
-    {
-      key: 'route',
-      header: 'Facility Transit Route',
-      render: (r) => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: 'var(--font-size-xs)' }}>
-          <span style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>{r.source_warehouse?.name || `Warehouse #${r.source_warehouse_id}`}</span>
-          <ArrowLeftRight size={12} style={{ color: 'var(--color-text-muted)' }} />
-          <span style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>{r.destination_warehouse?.name || `Warehouse #${r.destination_warehouse_id}`}</span>
-        </div>
-      )
-    },
-    {
-      key: 'items_count',
-      header: 'Transfer Manifest',
-      align: 'center',
-      render: (r) => (
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
-          {r.items?.length || r.transfer_items?.length || 1} line item(s)
-        </span>
-      )
-    },
-    {
-      key: 'status',
-      header: 'Rebalancing State',
-      render: (r) => <StatusBadge status={r.status} size="sm" />
-    }
-  ];
-
-  const currentStatus = (selectedTransfer?.status || '').toUpperCase();
 
   return (
-    <div className="transfers-page animate-fade-in">
-      <PageHeader
-        eyebrow="INVENTORY // REBALANCING"
-        title="Stock Transfers & Hub Relocations"
-        description="Inter-warehouse inventory relocation orders, node replenishment, and in-transit reconciliation."
-        actions={
-          <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-            <Button
-              variant="outline"
-              size="sm"
-              icon={RefreshCw}
-              onClick={refetch}
-            >
-              Refresh Transfers
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              icon={Plus}
-              onClick={() => setIsCreateOpen(true)}
-            >
-              Request Transfer
-            </Button>
-          </div>
-        }
-      />
-
-      {/* KPI Summary Strip */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: 'var(--space-3)',
-          marginBottom: 'var(--space-5)'
-        }}
-      >
-        <div
-          style={{
-            padding: '0.85rem 1.15rem',
-            backgroundColor: 'var(--color-bg-card)',
-            border: '1px solid var(--color-border-default)',
-            borderRadius: 'var(--radius-lg)'
-          }}
-        >
-          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Total Relocation Orders
-          </span>
-          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
-            {formatNumber(summaryStats.total)}
-          </div>
-        </div>
-
-        <div
-          style={{
-            padding: '0.85rem 1.15rem',
-            backgroundColor: 'var(--color-bg-card)',
-            border: '1px solid var(--color-border-default)',
-            borderRadius: 'var(--radius-lg)'
-          }}
-        >
-          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Pending Authorization
-          </span>
-          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-warning-text)', fontFamily: 'var(--font-mono)' }}>
-            {formatNumber(summaryStats.pending)}
-          </div>
-        </div>
-
-        <div
-          style={{
-            padding: '0.85rem 1.15rem',
-            backgroundColor: 'var(--color-bg-card)',
-            border: '1px solid var(--color-border-default)',
-            borderRadius: 'var(--radius-lg)'
-          }}
-        >
-          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Inter-Hub In Transit
-          </span>
-          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-info-text)', fontFamily: 'var(--font-mono)' }}>
-            {formatNumber(summaryStats.inTransit)}
-          </div>
-        </div>
-
-        <div
-          style={{
-            padding: '0.85rem 1.15rem',
-            backgroundColor: 'var(--color-bg-card)',
-            border: '1px solid var(--color-border-default)',
-            borderRadius: 'var(--radius-lg)'
-          }}
-        >
-          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Completed Transfers
-          </span>
-          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-success-text)', fontFamily: 'var(--font-mono)' }}>
-            {formatNumber(summaryStats.completed)}
-          </div>
-        </div>
-      </div>
-
-      <FilterBar
-        search={search}
-        onSearchChange={(val) => {
-          setSearch(val);
-          setPage(1);
-        }}
-        searchPlaceholder="Filter by transfer number, facility name..."
-        hasActiveFilters={Boolean(search || statusFilter)}
-        onReset={() => {
-          setSearch('');
-          setStatusFilter('');
-          setPage(1);
-        }}
-      >
-        <Select
-          value={statusFilter}
-          onChange={(e) => {
-            setStatusFilter(e.target.value);
-            setPage(1);
-          }}
-          options={[
-            { value: '', label: 'All Statuses' },
-            { value: 'REQUESTED', label: 'Requested' },
-            { value: 'APPROVED', label: 'Approved' },
-            { value: 'IN_TRANSIT', label: 'In Transit' },
-            { value: 'COMPLETED', label: 'Completed' },
-            { value: 'CANCELLED', label: 'Cancelled' }
-          ]}
+    <motion.div className="page" variants={pageStagger} initial="hidden" animate="visible">
+      <motion.div variants={riseIn}>
+        <PageHeader
+          eyebrow="INVENTORY / REBALANCING"
+          title="Stock transfers"
+          description="Inter-facility stock movements with explicit approval, dispatch and receipt gates."
+          actions={
+            <>
+              <button className="btn btn-outline" onClick={load}><RefreshCw size={11} className={loading ? 'animate-spin' : ''} /> Refresh</button>
+              <button className="btn btn-primary" onClick={openCreate}><Plus size={11} /> New transfer</button>
+            </>
+          }
         />
-      </FilterBar>
+      </motion.div>
 
-      <Table
-        columns={columns}
-        data={transfers}
-        loading={loading}
-        onRowClick={(t) => setSelectedTransfer(t)}
-        emptyTitle="No Transfers Found"
-        emptyMessage="No stock transfer records matched your filter criteria."
-      />
+      <motion.div variants={riseIn}>
+        <StatGrid cols={4}>
+          <Stat label="Transfers" value={formatNumber(filtered.length)} meta={`${formatNumber(rows.length)} total records`} icon={ArrowLeftRight} />
+          <Stat label="Units in scope" value={formatNumber(stats.units)} meta="Requested quantity" />
+          <Stat label="In transit" value={formatNumber(stats.transit)} meta="Between facilities" tone="accent" />
+          <Stat label="Completed" value={formatNumber(stats.done)} meta="Received at destination" tone="good" />
+        </StatGrid>
+      </motion.div>
 
-      <Pagination
-        currentPage={page}
-        totalPages={pagination.totalPages || 1}
-        totalItems={pagination.total || transfers.length}
-        limit={limit}
-        onPageChange={setPage}
-        onLimitChange={setLimit}
-      />
-
-      {/* Transfer Details Drawer */}
-      <Drawer
-        isOpen={Boolean(selectedTransfer)}
-        onClose={() => setSelectedTransfer(null)}
-        title={selectedTransfer?.transfer_number || `Stock Transfer #${selectedTransfer?.transfer_id || selectedTransfer?.id}`}
-        subtitle={`Route: ${selectedTransfer?.source_warehouse?.name || 'Origin'} → ${selectedTransfer?.destination_warehouse?.name || 'Destination'}`}
-      >
-        {selectedTransfer && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-            <div style={{ padding: '0.85rem 1rem', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
-                <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Transfer Status</span>
-                <StatusBadge status={selectedTransfer.status} size="sm" />
-              </div>
-              <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)', display: 'flex', justifyContent: 'space-between' }}>
-                <span>Source Origin:</span>
-                <strong style={{ color: 'var(--color-text-primary)' }}>{selectedTransfer.source_warehouse?.name || `Warehouse #${selectedTransfer.source_warehouse_id}`}</strong>
-              </div>
-              <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)', display: 'flex', justifyContent: 'space-between', marginTop: '0.3rem' }}>
-                <span>Destination Receiving:</span>
-                <strong style={{ color: 'var(--color-text-primary)' }}>{selectedTransfer.destination_warehouse?.name || `Warehouse #${selectedTransfer.destination_warehouse_id}`}</strong>
-              </div>
-              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)', marginTop: '0.4rem', borderTop: '1px solid var(--color-border-subtle)', paddingTop: '0.4rem' }}>
-                <strong style={{ color: 'var(--color-text-muted)' }}>Created At:</strong> {formatDate(selectedTransfer.created_at)}
-              </div>
+      <motion.div variants={riseIn}>
+        <Panel>
+          <div className="toolbar">
+            <div className="toolbar-group">
+              <label className="search-field">
+                <Search size={12} />
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Transfer or facility…" />
+                {search && <button onClick={() => setSearch('')}><X size={11} /></button>}
+              </label>
+              <select value={status} onChange={(e) => setStatus(e.target.value)} style={{ height: 30, fontSize: 11 }}>
+                <option value="">All statuses</option>
+                {['REQUESTED', 'APPROVED', 'IN_TRANSIT', 'COMPLETED', 'CANCELLED'].map((s) => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
+              </select>
             </div>
+            <span className="mono" style={{ fontSize: 9.5, color: 'var(--color-text-muted)' }}>{filtered.length} RECORDS</span>
+          </div>
 
-            {/* Operational Actions */}
-            <div style={{ padding: '0.85rem 1rem', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
-              <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--color-text-muted)', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                Rebalancing Actions
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                {['REQUESTED', 'PENDING'].includes(currentStatus) && (
-                  <>
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      icon={CheckCircle}
-                      loading={actionLoading}
-                      onClick={() => handleAction('APPROVE')}
-                    >
-                      Approve Transfer
-                    </Button>
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      icon={XCircle}
-                      loading={actionLoading}
-                      onClick={() => handleAction('CANCEL')}
-                    >
-                      Cancel
-                    </Button>
-                  </>
-                )}
-
-                {currentStatus === 'APPROVED' && (
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    icon={Truck}
-                    loading={actionLoading}
-                    onClick={() => handleAction('DISPATCH')}
-                  >
-                    Dispatch Transfer (In Transit)
-                  </Button>
-                )}
-
-                {currentStatus === 'IN_TRANSIT' && (
-                  <Button
-                    variant="success"
-                    size="sm"
-                    icon={PackageCheck}
-                    loading={actionLoading}
-                    onClick={() => handleAction('RECEIVE')}
-                  >
-                    Receive & Restock Destination
-                  </Button>
-                )}
-
-                {['COMPLETED', 'CANCELLED'].includes(currentStatus) && (
-                  <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
-                    Transfer is in terminal state ({currentStatus}).
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Items */}
-            {(selectedTransfer.items || selectedTransfer.transfer_items) && (selectedTransfer.items || selectedTransfer.transfer_items).length > 0 && (
-              <div>
-                <h4 style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>
-                  Transfer Line Items
-                </h4>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                  {(selectedTransfer.items || selectedTransfer.transfer_items).map((item, idx) => (
-                    <div
-                      key={idx}
-                      style={{
-                        padding: '0.65rem 0.85rem',
-                        backgroundColor: 'var(--color-bg-secondary)',
-                        borderRadius: 'var(--radius-md)',
-                        border: '1px solid var(--color-border-subtle)',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center'
-                      }}
-                    >
-                      <div>
-                        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-primary)', fontWeight: 600 }}>
-                          {item.products?.name || item.product_name || `Product #${item.product_id}`}
-                        </div>
-                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                          SKU: <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-secondary)' }}>{item.products?.sku || 'SKU'}</span>
-                        </div>
-                      </div>
-                      <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--color-text-primary)' }}>
-                        {item.requested_quantity || item.quantity} units
-                      </span>
-                    </div>
+          {error ? (
+            <div style={{ padding: 30, textAlign: 'center', color: 'var(--color-danger-text)', fontSize: 11 }}>{error}</div>
+          ) : (
+            <div className="table-scroll tall">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Transfer</th>
+                    <th>Lane</th>
+                    <th>Requested</th>
+                    <th style={{ textAlign: 'right' }}>Lines</th>
+                    <th style={{ textAlign: 'right' }}>Units</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading && Array.from({ length: 8 }).map((_, i) => (
+                    <tr key={i}>{Array.from({ length: 6 }).map((__, j) => <td key={j}><div className="skeleton" style={{ height: 9 }} /></td>)}</tr>
                   ))}
+                  {!loading && filtered.map((r) => (
+                    <tr key={r.transfer_id} className="clickable" onClick={() => setSelected(r)}>
+                      <td className="mono" style={{ fontSize: 10 }}>{r.transfer_number}</td>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontSize: 11 }}>{r.source_warehouse_name}</span>
+                          <ArrowRight size={10} style={{ color: 'var(--color-text-dim)' }} />
+                          <span style={{ fontSize: 11 }}>{r.destination_warehouse_name}</span>
+                        </div>
+                        <div className="cell-sub mono">{r.source_warehouse_code} → {r.destination_warehouse_code}</div>
+                      </td>
+                      <td className="mono" style={{ color: 'var(--color-text-muted)' }}>{formatDate(r.requested_at)}</td>
+                      <td className="mono" style={{ textAlign: 'right' }}>{r.items?.length || 0}</td>
+                      <td className="mono" style={{ textAlign: 'right' }}>{formatNumber((r.items || []).reduce((s, i) => s + Number(i.requested_quantity || 0), 0))}</td>
+                      <td><StatusBadge status={r.status} size="sm" /></td>
+                    </tr>
+                  ))}
+                  {!loading && filtered.length === 0 && (
+                    <tr><td colSpan={6} style={{ padding: 40, textAlign: 'center', color: 'var(--color-text-muted)' }}>No transfers match this filter.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Panel>
+      </motion.div>
+
+      <Drawer isOpen={Boolean(selected)} onClose={() => setSelected(null)}
+        title={selected?.transfer_number || 'Transfer'}
+        subtitle={selected ? `${selected.source_warehouse_name} → ${selected.destination_warehouse_name}` : ''}
+        footer={selected && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {selected.status === 'REQUESTED' && <Button variant="primary" loading={busy} icon={CheckCircle} onClick={() => act(transferService.approveTransfer, 'APPROVED')}>Approve</Button>}
+            {selected.status === 'APPROVED' && <Button variant="primary" loading={busy} icon={Truck} onClick={() => act(transferService.dispatchTransfer, 'IN TRANSIT')}>Dispatch</Button>}
+            {selected.status === 'IN_TRANSIT' && <Button variant="success" loading={busy} icon={PackageCheck} onClick={() => act(transferService.receiveTransfer, 'COMPLETED')}>Receive</Button>}
+            {['REQUESTED', 'APPROVED'].includes(selected.status) && <Button variant="danger" loading={busy} icon={XCircle} onClick={() => act(transferService.cancelTransfer, 'CANCELLED')}>Cancel</Button>}
+          </div>
+        )}>
+        {selected && (
+          <div style={{ display: 'grid', gap: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <Fact label="Status" value={<StatusBadge status={selected.status} size="sm" />} />
+              <Fact label="Requested" value={formatDate(selected.requested_at)} />
+              <Fact label="Source" value={selected.source_warehouse_name} />
+              <Fact label="Destination" value={selected.destination_warehouse_name} />
+            </div>
+            <div>
+              <div className="eyebrow" style={{ marginBottom: 7 }}>Movement lines</div>
+              {(selected.items || []).map((i) => (
+                <div key={i.transfer_item_id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '8px 0', borderBottom: '1px solid var(--color-border-subtle)' }}>
+                  <div>
+                    <div style={{ fontSize: 11 }}>{i.product_name}</div>
+                    <div className="mono" style={{ fontSize: 9, color: 'var(--color-text-muted)' }}>{i.sku} · {i.source_location} → {i.destination_location}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div className="mono" style={{ fontSize: 10 }}>{i.requested_quantity} requested</div>
+                    <div className="mono" style={{ fontSize: 9, color: 'var(--color-text-muted)' }}>{i.shipped_quantity} shipped · {i.received_quantity} received</div>
+                  </div>
                 </div>
-              </div>
-            )}
+              ))}
+            </div>
+            {selected.notes && <div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>{selected.notes}</div>}
           </div>
         )}
       </Drawer>
 
-      {/* Create Transfer Modal */}
-      <Modal
-        isOpen={isCreateOpen}
-        onClose={() => !createSubmitting && setIsCreateOpen(false)}
-        title="Request Stock Transfer"
-        subtitle="Initiate inter-facility inventory rebalancing order."
-        size="lg"
-        footer={
-          <>
-            <Button
-              variant="ghost"
-              disabled={createSubmitting}
-              onClick={() => setIsCreateOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              loading={createSubmitting}
-              onClick={handleCreateSubmit}
-            >
-              Request Stock Transfer
-            </Button>
-          </>
-        }
-      >
-        <form onSubmit={handleCreateSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
-            <Select
-              label="Source Origin Warehouse"
-              required
-              value={newTransfer.source_warehouse_id}
-              onChange={(e) => setNewTransfer({ ...newTransfer, source_warehouse_id: e.target.value })}
-              options={warehouses.map((w) => ({
-                value: w.warehouse_id || w.id,
-                label: `${w.name} (${w.warehouse_code || 'Origin'})`
-              }))}
-            />
-
-            <Select
-              label="Destination Receiving Warehouse"
-              required
-              value={newTransfer.destination_warehouse_id}
-              onChange={(e) => setNewTransfer({ ...newTransfer, destination_warehouse_id: e.target.value })}
-              options={warehouses.map((w) => ({
-                value: w.warehouse_id || w.id,
-                label: `${w.name} (${w.warehouse_code || 'Dest'})`
-              }))}
-            />
+      <Modal isOpen={createOpen} onClose={() => !submitting && setCreateOpen(false)}
+        title="Request stock transfer" subtitle="Move inventory between distribution centres." size="lg"
+        footer={<><Button variant="ghost" disabled={submitting} onClick={() => setCreateOpen(false)}>Cancel</Button><Button variant="primary" loading={submitting} onClick={submit}>Request transfer</Button></>}>
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div className="form-grid cols-2">
+            <Select label="Source hub" value={form.source_warehouse_id} onChange={(e) => setForm({ ...form, source_warehouse_id: e.target.value })}
+              options={lookups.warehouses.map((w) => ({ value: w.warehouse_id, label: w.warehouse_name }))} />
+            <Select label="Destination hub" value={form.destination_warehouse_id} onChange={(e) => setForm({ ...form, destination_warehouse_id: e.target.value })}
+              options={lookups.warehouses.map((w) => ({ value: w.warehouse_id, label: w.warehouse_name }))} />
           </div>
-
+          <Input label="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Reason for rebalancing" />
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-2)' }}>
-              <label style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text-secondary)' }}>
-                Transfer Items
-              </label>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                icon={Plus}
-                onClick={addItemRow}
-              >
-                Add Item
-              </Button>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+              <span className="eyebrow">Items</span>
+              <button className="btn btn-ghost" onClick={() => {
+                const p = lookups.products[0] || {};
+                setForm((f) => ({ ...f, items: [...f.items, { product_id: p.product_id || '', requested_quantity: 5 }] }));
+              }}><Plus size={10} /> Add item</button>
             </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-              {newTransfer.items.map((item, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '3fr 1.5fr auto',
-                    gap: 'var(--space-2)',
-                    alignItems: 'center',
-                    padding: '0.6rem',
-                    backgroundColor: 'var(--color-bg-secondary)',
-                    borderRadius: 'var(--radius-md)',
-                    border: '1px solid var(--color-border-subtle)'
-                  }}
-                >
-                  <Select
-                    value={item.product_id}
-                    onChange={(e) => updateItemRow(idx, 'product_id', e.target.value)}
-                    options={products.map((p) => ({
-                      value: p.product_id || p.id,
-                      label: `${p.name} (${p.sku || 'SKU'})`
-                    }))}
-                  />
-
-                  <Input
-                    type="number"
-                    min="1"
-                    value={item.requested_quantity}
-                    onChange={(e) => updateItemRow(idx, 'requested_quantity', Number(e.target.value))}
-                    placeholder="Qty"
-                  />
-
-                  {newTransfer.items.length > 1 && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      style={{ color: 'var(--color-danger-text)' }}
-                      onClick={() => removeItemRow(idx)}
-                    >
-                      ✕
-                    </Button>
-                  )}
+            <div style={{ display: 'grid', gap: 6 }}>
+              {form.items.map((it, idx) => (
+                <div key={idx} style={{ display: 'grid', gridTemplateColumns: '3fr 1fr auto', gap: 6, alignItems: 'end' }}>
+                  <Select value={it.product_id} onChange={(e) => {
+                    const items = [...form.items]; items[idx] = { ...items[idx], product_id: e.target.value }; setForm({ ...form, items });
+                  }} options={lookups.products.map((p) => ({ value: p.product_id, label: `${p.sku} · ${p.product_name}` }))} />
+                  <Input type="number" min="1" value={it.requested_quantity} label={idx === 0 ? 'Units' : undefined} onChange={(e) => {
+                    const items = [...form.items]; items[idx] = { ...items[idx], requested_quantity: e.target.value }; setForm({ ...form, items });
+                  }} />
+                  <button className="btn btn-ghost btn-icon" disabled={form.items.length === 1} onClick={() => setForm({ ...form, items: form.items.filter((_, i) => i !== idx) })}><X size={12} /></button>
                 </div>
               ))}
             </div>
           </div>
-        </form>
+        </div>
       </Modal>
+    </motion.div>
+  );
+}
+
+function Fact({ label, value }) {
+  return (
+    <div style={{ border: '1px solid var(--color-border-subtle)', borderRadius: 4, padding: '7px 9px' }}>
+      <div className="eyebrow" style={{ fontSize: 8, marginBottom: 3 }}>{label}</div>
+      <div style={{ fontSize: 10.5 }}>{value || '—'}</div>
     </div>
   );
 }

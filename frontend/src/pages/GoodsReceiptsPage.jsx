@@ -1,531 +1,289 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { PackageCheck, RefreshCw, Plus, CheckCircle, Eye } from 'lucide-react';
-import { useApiQuery } from '../hooks/useApiQuery';
-import { usePagination } from '../hooks/usePagination';
-import * as goodsReceiptService from '../services/goodsReceiptService';
-import * as purchaseOrderService from '../services/purchaseOrderService';
-import * as warehouseService from '../services/warehouseService';
-import * as productService from '../services/productService';
-import { normalizeList, normalizePagination } from '../utils/responseNormalizer';
+import React, { useEffect, useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
+import { RefreshCw, Search, X, Plus, PackageCheck, AlertTriangle } from 'lucide-react';
+import * as grnService from '../services/goodsReceiptService';
+import * as poService from '../services/purchaseOrderService';
+import { normalizeList } from '../utils/responseNormalizer';
 import { useToast } from '../context/ToastContext';
 import { PageHeader } from '../components/common/PageHeader';
-import { FilterBar } from '../components/common/FilterBar';
-import { Table } from '../components/common/Table';
-import { Pagination } from '../components/common/Pagination';
-import { Select } from '../components/common/Select';
-import { Input } from '../components/common/Input';
-import { Button } from '../components/common/Button';
+import { Panel, PanelBody, Stat, StatGrid } from '../components/common/Panel';
+import { StatusBadge } from '../components/common/StatusBadge';
 import { Drawer } from '../components/common/Drawer';
 import { Modal } from '../components/common/Modal';
-import { StatusBadge } from '../components/common/StatusBadge';
+import { Button } from '../components/common/Button';
+import { Input } from '../components/common/Input';
+import { Select } from '../components/common/Select';
 import { formatDate, formatNumber } from '../utils/formatters';
+import { pageStagger, riseIn } from '../utils/motion';
 
 export function GoodsReceiptsPage() {
   const toast = useToast();
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [selectedGRN, setSelectedGRN] = useState(null);
+  const [status, setStatus] = useState('');
+  const [selected, setSelected] = useState(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [poList, setPoList] = useState([]);
+  const [po, setPo] = useState(null);
+  const [receiptItems, setReceiptItems] = useState([]);
+  const [notes, setNotes] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
-  // Create GRN Modal
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [createSubmitting, setCreateSubmitting] = useState(false);
-  const [purchaseOrders, setPurchaseOrders] = useState([]);
-  const [warehouses, setWarehouses] = useState([]);
-  const [products, setProducts] = useState([]);
+  const load = () => {
+    setLoading(true); setError(null);
+    grnService.getGoodsReceipts({ limit: 200 })
+      .then((res) => { setRows(normalizeList(res)); setLoading(false); })
+      .catch((e) => { setError(e?.message || 'Receiving service unavailable.'); setLoading(false); });
+  };
+  useEffect(load, []);
 
-  const [newGRN, setNewGRN] = useState({
-    purchase_order_id: '',
-    warehouse_id: '',
-    items: [{ product_id: '', quantity_received: 10, condition: 'GOOD', batch_number: 'BATCH-2026-A' }]
-  });
+  const filtered = useMemo(() => rows.filter((r) => {
+    const q = search.trim().toLowerCase();
+    const match = !q || [r.grn_number, r.po_number, r.supplier_name, r.warehouse_name].some((v) => String(v || '').toLowerCase().includes(q));
+    return match && (!status || r.status === status);
+  }), [rows, search, status]);
 
-  const { page, limit, setPage, setLimit } = usePagination(1, 20);
+  const stats = useMemo(() => filtered.reduce((a, r) => {
+    a.received += (r.items || []).reduce((s, i) => s + Number(i.received_quantity || 0), 0);
+    a.damaged += (r.items || []).reduce((s, i) => s + Number(i.damaged_quantity || 0), 0);
+    if (r.status === 'ACCEPTED') a.accepted += 1;
+    return a;
+  }, { received: 0, damaged: 0, accepted: 0 }), [filtered]);
 
-  const { data: rawData, loading, error, refetch } = useApiQuery(
-    goodsReceiptService.getGoodsReceipts,
-    { page, limit, search, status: statusFilter },
-    { immediate: true }
-  );
-
-  const receipts = useMemo(() => normalizeList(rawData), [rawData]);
-  const pagination = useMemo(() => normalizePagination(rawData, receipts, page, limit), [rawData, receipts, page, limit]);
-
-  // Compute live summary stats
-  const summaryStats = useMemo(() => {
-    let acceptedCount = 0;
-    let totalUnits = 0;
-
-    receipts.forEach((grn) => {
-      const st = (grn.status || 'ACCEPTED').toUpperCase();
-      if (st === 'ACCEPTED' || st === 'COMPLETED') acceptedCount += 1;
-      const items = grn.items || grn.receipt_items || [];
-      items.forEach((it) => {
-        totalUnits += Number(it.quantity_received || it.quantity || 0);
-      });
-    });
-
-    return {
-      total: pagination.total || receipts.length,
-      accepted: acceptedCount,
-      totalUnits
-    };
-  }, [receipts, pagination.total]);
-
-  useEffect(() => {
-    if (isCreateOpen) {
-      Promise.all([
-        purchaseOrderService.getPurchaseOrders({ limit: 50 }).catch(() => ({ data: [] })),
-        warehouseService.getWarehouses({ limit: 50 }).catch(() => ({ data: [] })),
-        productService.getProducts({ limit: 50 }).catch(() => ({ data: [] }))
-      ]).then(([poRes, whRes, prodRes]) => {
-        const pos = normalizeList(poRes);
-        const whs = normalizeList(whRes);
-        const prods = normalizeList(prodRes);
-        setPurchaseOrders(pos);
-        setWarehouses(whs);
-        setProducts(prods);
-
-        setNewGRN((prev) => ({
-          ...prev,
-          purchase_order_id: prev.purchase_order_id || (pos[0]?.po_id || pos[0]?.purchase_order_id || pos[0]?.id || 1),
-          warehouse_id: prev.warehouse_id || (whs[0]?.warehouse_id || whs[0]?.id || 1),
-          items: prev.items.map((item) => ({
-            ...item,
-            product_id: item.product_id || (prods[0]?.product_id || prods[0]?.id || 1)
-          }))
-        }));
-      });
+  const openCreate = async () => {
+    setCreateOpen(true);
+    if (!poList.length) {
+      try {
+        const res = await poService.getPurchaseOrders({ limit: 100 });
+        const list = normalizeList(res).filter((p) => !['RECEIVED', 'CANCELLED'].includes(p.status));
+        setPoList(list);
+        if (list[0]) await choosePo(list[0].purchase_order_id, list);
+      } catch (e) {
+        toast.error(e?.message || 'Could not load purchase orders.');
+      }
     }
-  }, [isCreateOpen]);
+  };
 
-  const handleCreateSubmit = async (e) => {
-    e.preventDefault();
-    if (!newGRN.purchase_order_id || !newGRN.items || newGRN.items.length === 0) {
-      toast.error('Please specify a purchase order and at least one received item');
-      return;
-    }
-
-    setCreateSubmitting(true);
+  const choosePo = async (id, list = poList) => {
     try {
-      const payload = {
-        purchase_order_id: Number(newGRN.purchase_order_id),
-        warehouse_id: Number(newGRN.warehouse_id) || 1,
-        items: newGRN.items.map((item) => ({
-          product_id: Number(item.product_id),
-          quantity_received: Number(item.quantity_received) || 1,
-          condition: item.condition || 'GOOD',
-          batch_number: item.batch_number || `BATCH-${Date.now().toString().slice(-4)}`
+      const res = await poService.getPurchaseOrderById(id);
+      const detail = res?.data || res;
+      setPo(detail);
+      setReceiptItems((detail.items || []).map((i) => ({
+        product_id: i.product_id,
+        product_name: i.product_name,
+        sku: i.sku,
+        ordered_quantity: i.ordered_quantity,
+        received_quantity: Math.max(0, Number(i.ordered_quantity) - Number(i.received_quantity || 0)),
+        accepted_quantity: Math.max(0, Number(i.ordered_quantity) - Number(i.received_quantity || 0)),
+        damaged_quantity: 0
+      })));
+      setNotes('');
+    } catch (e) {
+      toast.error(e?.message || 'Could not load purchase order.');
+    }
+  };
+
+  const submit = async () => {
+    if (!po || !receiptItems.length) { toast.error('Select a purchase order with open lines.'); return; }
+    setSubmitting(true);
+    try {
+      await grnService.createGoodsReceipt({
+        purchase_order_id: po.purchase_order_id,
+        warehouse_id: po.warehouse_id,
+        notes,
+        items: receiptItems.filter((i) => Number(i.received_quantity) > 0).map((i) => ({
+          product_id: i.product_id,
+          ordered_quantity: Number(i.ordered_quantity),
+          received_quantity: Number(i.received_quantity),
+          accepted_quantity: Number(i.accepted_quantity),
+          damaged_quantity: Number(i.damaged_quantity)
         }))
-      };
-
-      const res = await goodsReceiptService.createGoodsReceipt(payload);
-      toast.success(`Goods Receipt #${res?.data?.grn_number || ''} recorded successfully. Inventory updated.`);
-      setIsCreateOpen(false);
-      refetch();
-    } catch (err) {
-      toast.error(err.response?.data?.message || err.message || 'Failed to record goods receipt');
-    } finally {
-      setCreateSubmitting(false);
-    }
+      });
+      toast.success('Goods receipt posted and stock updated.');
+      setCreateOpen(false); setPo(null); load();
+    } catch (e) {
+      toast.error(e?.message || 'Goods receipt failed.');
+    } finally { setSubmitting(false); }
   };
-
-  const addItemRow = () => {
-    const defaultProd = products[0];
-    setNewGRN((prev) => ({
-      ...prev,
-      items: [
-        ...prev.items,
-        {
-          product_id: defaultProd?.product_id || defaultProd?.id || 1,
-          quantity_received: 10,
-          condition: 'GOOD',
-          batch_number: 'BATCH-2026-A'
-        }
-      ]
-    }));
-  };
-
-  const removeItemRow = (idx) => {
-    setNewGRN((prev) => ({
-      ...prev,
-      items: prev.items.filter((_, i) => i !== idx)
-    }));
-  };
-
-  const updateItemRow = (idx, field, value) => {
-    setNewGRN((prev) => {
-      const items = [...prev.items];
-      items[idx] = { ...items[idx], [field]: value };
-      return { ...prev, items };
-    });
-  };
-
-  const columns = [
-    {
-      key: 'grn_number',
-      header: 'GRN Identifier',
-      render: (r) => (
-        <div>
-          <div style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
-            {r.grn_number || `GRN-${r.grn_id || r.id}`}
-          </div>
-          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '0.15rem' }}>
-            Received: <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-secondary)' }}>{formatDate(r.received_date || r.created_at)}</span>
-          </div>
-        </div>
-      )
-    },
-    {
-      key: 'po_number',
-      header: 'Linked PO Ref',
-      render: (r) => (
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
-          {r.purchase_orders?.po_number || r.po_number || `PO #${r.purchase_order_id}`}
-        </span>
-      )
-    },
-    {
-      key: 'warehouse',
-      header: 'Receiving Dock Hub',
-      render: (r) => (
-        <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
-          {r.warehouses?.name || r.warehouse_name || 'Central Facility'}
-        </span>
-      )
-    },
-    {
-      key: 'received_by',
-      header: 'Dock Officer',
-      render: (r) => (
-        <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
-          Staff #{r.received_by || 1}
-        </span>
-      )
-    },
-    {
-      key: 'status',
-      header: 'QA Disposition',
-      render: (r) => <StatusBadge status={r.status || 'ACCEPTED'} size="sm" />
-    }
-  ];
 
   return (
-    <div className="goods-receipts-page animate-fade-in">
-      <PageHeader
-        eyebrow="RECEIVING // DOCK INTAKE"
-        title="Goods Receipts & Inbound Docks"
-        description="Physical dock intake notes, lot / batch verification, QA dispositions, and on-hand inventory absorption."
-        actions={
-          <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-            <Button
-              variant="outline"
-              size="sm"
-              icon={RefreshCw}
-              onClick={refetch}
-            >
-              Refresh Docks
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              icon={Plus}
-              onClick={() => setIsCreateOpen(true)}
-            >
-              Receive Goods (GRN)
-            </Button>
-          </div>
-        }
-      />
-
-      {/* KPI Summary Strip */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: 'var(--space-3)',
-          marginBottom: 'var(--space-5)'
-        }}
-      >
-        <div
-          style={{
-            padding: '0.85rem 1.15rem',
-            backgroundColor: 'var(--color-bg-card)',
-            border: '1px solid var(--color-border-default)',
-            borderRadius: 'var(--radius-lg)'
-          }}
-        >
-          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Goods Receipts Issued
-          </span>
-          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
-            {formatNumber(summaryStats.total)}
-          </div>
-        </div>
-
-        <div
-          style={{
-            padding: '0.85rem 1.15rem',
-            backgroundColor: 'var(--color-bg-card)',
-            border: '1px solid var(--color-border-default)',
-            borderRadius: 'var(--radius-lg)'
-          }}
-        >
-          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Accepted Shipments
-          </span>
-          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-success-text)', fontFamily: 'var(--font-mono)' }}>
-            {formatNumber(summaryStats.accepted)}
-          </div>
-        </div>
-
-        <div
-          style={{
-            padding: '0.85rem 1.15rem',
-            backgroundColor: 'var(--color-bg-card)',
-            border: '1px solid var(--color-border-default)',
-            borderRadius: 'var(--radius-lg)'
-          }}
-        >
-          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Total Ingested Physical Units
-          </span>
-          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
-            {formatNumber(summaryStats.totalUnits)} units
-          </div>
-        </div>
-      </div>
-
-      <FilterBar
-        search={search}
-        onSearchChange={(val) => {
-          setSearch(val);
-          setPage(1);
-        }}
-        searchPlaceholder="Filter by GRN number, PO reference, warehouse..."
-        hasActiveFilters={Boolean(search || statusFilter)}
-        onReset={() => {
-          setSearch('');
-          setStatusFilter('');
-          setPage(1);
-        }}
-      >
-        <Select
-          value={statusFilter}
-          onChange={(e) => {
-            setStatusFilter(e.target.value);
-            setPage(1);
-          }}
-          options={[
-            { value: '', label: 'All Statuses' },
-            { value: 'ACCEPTED', label: 'Accepted' },
-            { value: 'PARTIAL', label: 'Partial' },
-            { value: 'INSPECTING', label: 'Inspecting' }
-          ]}
+    <motion.div className="page" variants={pageStagger} initial="hidden" animate="visible">
+      <motion.div variants={riseIn}>
+        <PageHeader
+          eyebrow="RECEIVING / DOCK INTAKE"
+          title="Goods receipts"
+          description="Inbound inspection records that move accepted units into warehouse stock."
+          actions={
+            <>
+              <button className="btn btn-outline" onClick={load}><RefreshCw size={11} className={loading ? 'animate-spin' : ''} /> Refresh</button>
+              <button className="btn btn-primary" onClick={openCreate}><Plus size={11} /> Receive against PO</button>
+            </>
+          }
         />
-      </FilterBar>
+      </motion.div>
 
-      <Table
-        columns={columns}
-        data={receipts}
-        loading={loading}
-        onRowClick={(grn) => setSelectedGRN(grn)}
-        emptyTitle="No Goods Receipts Found"
-        emptyMessage="No dock goods receipt records matched your filter criteria."
-      />
+      <motion.div variants={riseIn}>
+        <StatGrid cols={4}>
+          <Stat label="Receipts" value={formatNumber(filtered.length)} meta={`${formatNumber(rows.length)} total GRNs`} icon={PackageCheck} />
+          <Stat label="Accepted" value={formatNumber(stats.accepted)} meta="Closed receipts" tone="good" />
+          <Stat label="Units received" value={formatNumber(stats.received)} meta="Across visible receipts" />
+          <Stat label="Damaged units" value={formatNumber(stats.damaged)} meta="Quarantined on intake" tone={stats.damaged ? 'bad' : ''} icon={AlertTriangle} />
+        </StatGrid>
+      </motion.div>
 
-      <Pagination
-        currentPage={page}
-        totalPages={pagination.totalPages || 1}
-        totalItems={pagination.total || receipts.length}
-        limit={limit}
-        onPageChange={setPage}
-        onLimitChange={setLimit}
-      />
-
-      {/* GRN Detail Drawer */}
-      <Drawer
-        isOpen={Boolean(selectedGRN)}
-        onClose={() => setSelectedGRN(null)}
-        title={selectedGRN?.grn_number || `GRN #${selectedGRN?.grn_id || selectedGRN?.id}`}
-        subtitle={`PO Reference: ${selectedGRN?.purchase_orders?.po_number || selectedGRN?.po_number || 'Linked PO'}`}
-      >
-        {selectedGRN && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-            <div style={{ padding: '0.85rem 1rem', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
-                <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>QA Disposition</span>
-                <StatusBadge status={selectedGRN.status || 'ACCEPTED'} size="sm" />
-              </div>
-              <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)', display: 'flex', justifyContent: 'space-between' }}>
-                <span>Receiving Facility:</span>
-                <strong style={{ color: 'var(--color-text-primary)' }}>{selectedGRN.warehouses?.name || 'Central Facility'}</strong>
-              </div>
-              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)', marginTop: '0.4rem', borderTop: '1px solid var(--color-border-subtle)', paddingTop: '0.4rem' }}>
-                <strong style={{ color: 'var(--color-text-muted)' }}>Date Ingested:</strong> {formatDate(selectedGRN.received_date || selectedGRN.created_at)}
-              </div>
+      <motion.div variants={riseIn}>
+        <Panel>
+          <div className="toolbar">
+            <div className="toolbar-group">
+              <label className="search-field">
+                <Search size={12} />
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="GRN, PO, supplier or hub…" />
+                {search && <button onClick={() => setSearch('')}><X size={11} /></button>}
+              </label>
+              <select value={status} onChange={(e) => setStatus(e.target.value)} style={{ height: 30, fontSize: 11 }}>
+                <option value="">All statuses</option>
+                {['ACCEPTED', 'PARTIAL', 'INSPECTING'].map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
             </div>
+            <span className="mono" style={{ fontSize: 9.5, color: 'var(--color-text-muted)' }}>{filtered.length} RECEIPTS</span>
+          </div>
 
-            {selectedGRN.items && selectedGRN.items.length > 0 && (
-              <div>
-                <h4 style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>
-                  Ingested Items ({selectedGRN.items.length})
-                </h4>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                  {selectedGRN.items.map((item, idx) => (
-                    <div
-                      key={idx}
-                      style={{
-                        padding: '0.65rem 0.85rem',
-                        backgroundColor: 'var(--color-bg-secondary)',
-                        borderRadius: 'var(--radius-md)',
-                        border: '1px solid var(--color-border-subtle)',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center'
-                      }}
-                    >
-                      <div>
-                        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-primary)', fontWeight: 600 }}>
-                          {item.products?.name || item.product_name || `Product #${item.product_id}`}
-                        </div>
-                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                          Batch: <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-secondary)' }}>{item.batch_number || 'N/A'}</span> • Condition: {item.condition || 'GOOD'}
-                        </div>
-                      </div>
-                      <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--color-success-text)' }}>
-                        +{item.quantity_received} units
-                      </span>
-                    </div>
+          {error ? (
+            <div style={{ padding: 30, textAlign: 'center', color: 'var(--color-danger-text)', fontSize: 11 }}>{error}</div>
+          ) : (
+            <div className="table-scroll tall">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>GRN</th>
+                    <th>Purchase order</th>
+                    <th>Supplier</th>
+                    <th>Receiving hub</th>
+                    <th>Received</th>
+                    <th style={{ textAlign: 'right' }}>Units</th>
+                    <th style={{ textAlign: 'right' }}>Damaged</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading && Array.from({ length: 8 }).map((_, i) => (
+                    <tr key={i}>{Array.from({ length: 8 }).map((__, j) => <td key={j}><div className="skeleton" style={{ height: 9 }} /></td>)}</tr>
                   ))}
+                  {!loading && filtered.map((r) => {
+                    const units = (r.items || []).reduce((s, i) => s + Number(i.received_quantity || 0), 0);
+                    const damaged = (r.items || []).reduce((s, i) => s + Number(i.damaged_quantity || 0), 0);
+                    return (
+                      <tr key={r.goods_receipt_id} className="clickable" onClick={() => setSelected(r)}>
+                        <td className="mono" style={{ fontSize: 10 }}>{r.grn_number}</td>
+                        <td className="mono" style={{ color: 'var(--color-text-secondary)' }}>{r.po_number}</td>
+                        <td className="cell-strong">{r.supplier_name}</td>
+                        <td>{r.warehouse_name}</td>
+                        <td className="mono" style={{ color: 'var(--color-text-muted)' }}>{formatDate(r.received_date)}</td>
+                        <td className="num" style={{ textAlign: 'right' }}>{formatNumber(units)}</td>
+                        <td className="num" style={{ textAlign: 'right', color: damaged ? 'var(--color-danger-text)' : 'var(--color-text-muted)' }}>{formatNumber(damaged)}</td>
+                        <td><StatusBadge status={r.status || 'ACCEPTED'} size="sm" /></td>
+                      </tr>
+                    );
+                  })}
+                  {!loading && filtered.length === 0 && (
+                    <tr><td colSpan={8} style={{ padding: 40, textAlign: 'center', color: 'var(--color-text-muted)' }}>No goods receipts match this filter.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Panel>
+      </motion.div>
+
+      <Drawer isOpen={Boolean(selected)} onClose={() => setSelected(null)}
+        title={selected?.grn_number || 'Goods receipt'}
+        subtitle={selected ? `${selected.po_number} · ${selected.supplier_name}` : ''}>
+        {selected && (
+          <div style={{ display: 'grid', gap: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <Fact label="Status" value={<StatusBadge status={selected.status || 'ACCEPTED'} size="sm" />} />
+              <Fact label="Received" value={formatDate(selected.received_date)} />
+              <Fact label="Hub" value={selected.warehouse_name} />
+              <Fact label="PO status" value={selected.po_status} />
+            </div>
+            <div>
+              <div className="eyebrow" style={{ marginBottom: 7 }}>Inspected lines</div>
+              {(selected.items || []).map((i) => (
+                <div key={i.goods_receipt_item_id} style={{ padding: '8px 0', borderBottom: '1px solid var(--color-border-subtle)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                    <span style={{ fontSize: 11 }}>{i.product_name}</span>
+                    <span className="mono" style={{ fontSize: 9, color: 'var(--color-text-muted)' }}>{i.sku}</span>
+                  </div>
+                  <div className="mono" style={{ fontSize: 9, color: 'var(--color-text-muted)', marginTop: 2 }}>
+                    {i.received_quantity} received · {i.accepted_quantity} accepted · {i.damaged_quantity} damaged
+                  </div>
                 </div>
-              </div>
-            )}
+              ))}
+              {!selected.items?.length && <div style={{ fontSize: 10.5, color: 'var(--color-text-muted)' }}>No lines returned.</div>}
+            </div>
+            {selected.notes && <div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>{selected.notes}</div>}
           </div>
         )}
       </Drawer>
 
-      {/* Create GRN Modal */}
-      <Modal
-        isOpen={isCreateOpen}
-        onClose={() => !createSubmitting && setIsCreateOpen(false)}
-        title="Receive Goods Shipment (GRN)"
-        subtitle="Intake vendor delivery at dock and automatically increase on-hand inventory."
-        size="lg"
-        footer={
-          <>
-            <Button
-              variant="ghost"
-              disabled={createSubmitting}
-              onClick={() => setIsCreateOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              loading={createSubmitting}
-              onClick={handleCreateSubmit}
-            >
-              Confirm Goods Receipt
-            </Button>
-          </>
-        }
-      >
-        <form onSubmit={handleCreateSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
-            <Select
-              label="Purchase Order"
-              required
-              value={newGRN.purchase_order_id}
-              onChange={(e) => setNewGRN({ ...newGRN, purchase_order_id: e.target.value })}
-              options={purchaseOrders.map((po) => ({
-                value: po.po_id || po.purchase_order_id || po.id,
-                label: `${po.po_number || `PO-${po.po_id || po.id}`} (${po.status})`
-              }))}
-            />
-
-            <Select
-              label="Receiving Warehouse Facility"
-              required
-              value={newGRN.warehouse_id}
-              onChange={(e) => setNewGRN({ ...newGRN, warehouse_id: e.target.value })}
-              options={warehouses.map((w) => ({
-                value: w.warehouse_id || w.id,
-                label: `${w.name} (${w.warehouse_code || 'Facility'})`
-              }))}
-            />
+      <Modal isOpen={createOpen} onClose={() => !submitting && setCreateOpen(false)}
+        title="Receive goods" subtitle="Post an inspected receipt against an open purchase order." size="lg"
+        footer={<><Button variant="ghost" disabled={submitting} onClick={() => setCreateOpen(false)}>Cancel</Button><Button variant="primary" loading={submitting} onClick={submit}>Post receipt</Button></>}>
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div className="form-grid cols-2">
+            <Select label="Open purchase order" value={po?.purchase_order_id || ''} onChange={(e) => choosePo(e.target.value)}
+              options={poList.map((p) => ({ value: p.purchase_order_id, label: `${p.po_number} · ${p.supplier_name}` }))} />
+            <Input label="Receiving hub" value={po?.warehouse_name || ''} disabled />
           </div>
+          <Input label="Receiving notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Condition, seal, inspection notes" />
 
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-2)' }}>
-              <label style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text-secondary)' }}>
-                Received Line Items
-              </label>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                icon={Plus}
-                onClick={addItemRow}
-              >
-                Add Item
-              </Button>
+          {po && (
+            <div>
+              <div className="eyebrow" style={{ marginBottom: 6 }}>Open lines</div>
+              <table className="data-table">
+                <thead><tr><th>Item</th><th>Ordered</th><th>Receiving</th><th>Accepted</th><th>Damaged</th></tr></thead>
+                <tbody>
+                  {receiptItems.map((i, idx) => (
+                    <tr key={i.product_id}>
+                      <td>
+                        <div style={{ fontSize: 10.5 }}>{i.product_name}</div>
+                        <div className="mono" style={{ fontSize: 8.5, color: 'var(--color-text-muted)' }}>{i.sku}</div>
+                      </td>
+                      <td className="mono">{i.ordered_quantity}</td>
+                      <td><input type="number" min="0" value={i.received_quantity} style={{ width: 70 }} onChange={(e) => {
+                        const next = [...receiptItems];
+                        next[idx] = { ...next[idx], received_quantity: e.target.value, accepted_quantity: Math.max(0, Number(e.target.value) - Number(next[idx].damaged_quantity)) };
+                        setReceiptItems(next);
+                      }} /></td>
+                      <td><input type="number" min="0" value={i.accepted_quantity} style={{ width: 70 }} onChange={(e) => {
+                        const next = [...receiptItems]; next[idx] = { ...next[idx], accepted_quantity: e.target.value }; setReceiptItems(next);
+                      }} /></td>
+                      <td><input type="number" min="0" value={i.damaged_quantity} style={{ width: 70 }} onChange={(e) => {
+                        const next = [...receiptItems];
+                        next[idx] = { ...next[idx], damaged_quantity: e.target.value, accepted_quantity: Math.max(0, Number(next[idx].received_quantity) - Number(e.target.value)) };
+                        setReceiptItems(next);
+                      }} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-              {newGRN.items.map((item, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '3fr 1.5fr 2fr auto',
-                    gap: 'var(--space-2)',
-                    alignItems: 'center',
-                    padding: '0.6rem',
-                    backgroundColor: 'var(--color-bg-secondary)',
-                    borderRadius: 'var(--radius-md)',
-                    border: '1px solid var(--color-border-subtle)'
-                  }}
-                >
-                  <Select
-                    value={item.product_id}
-                    onChange={(e) => updateItemRow(idx, 'product_id', e.target.value)}
-                    options={products.map((p) => ({
-                      value: p.product_id || p.id,
-                      label: `${p.name} (${p.sku || 'SKU'})`
-                    }))}
-                  />
-
-                  <Input
-                    type="number"
-                    min="1"
-                    value={item.quantity_received}
-                    onChange={(e) => updateItemRow(idx, 'quantity_received', Number(e.target.value))}
-                    placeholder="Qty"
-                  />
-
-                  <Input
-                    value={item.batch_number}
-                    onChange={(e) => updateItemRow(idx, 'batch_number', e.target.value)}
-                    placeholder="Batch #"
-                  />
-
-                  {newGRN.items.length > 1 && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      style={{ color: 'var(--color-danger-text)' }}
-                      onClick={() => removeItemRow(idx)}
-                    >
-                      ✕
-                    </Button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        </form>
+          )}
+          {!poList.length && <div className="form-hint">No purchase orders are currently open for receiving.</div>}
+        </div>
       </Modal>
+    </motion.div>
+  );
+}
+
+function Fact({ label, value }) {
+  return (
+    <div style={{ border: '1px solid var(--color-border-subtle)', borderRadius: 4, padding: '7px 9px' }}>
+      <div className="eyebrow" style={{ fontSize: 8, marginBottom: 3 }}>{label}</div>
+      <div style={{ fontSize: 10.5 }}>{value || '—'}</div>
     </div>
   );
 }

@@ -1,520 +1,189 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  Package, RefreshCw, Search, Tag, DollarSign, Layers, TrendingUp, BarChart3
-} from 'lucide-react';
-import { useApiQuery } from '../hooks/useApiQuery';
-import { usePagination } from '../hooks/usePagination';
+import { RefreshCw, Search, X, Package, Layers, Tag, ArrowUpRight } from 'lucide-react';
 import * as productService from '../services/productService';
-import { normalizeList, normalizePagination } from '../utils/responseNormalizer';
+import { normalizeList } from '../utils/responseNormalizer';
+import { PageHeader } from '../components/common/PageHeader';
+import { Panel, PanelHead, PanelBody, Stat, StatGrid, Meter } from '../components/common/Panel';
+import { StatusBadge } from '../components/common/StatusBadge';
 import { formatCurrency, formatNumber } from '../utils/formatters';
+import { pageStagger, riseIn, popIn } from '../utils/motion';
 
 export function ProductsPage() {
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('');
-  const [selectedProduct, setSelectedProduct] = useState(null);
-  const { page, limit, setPage, setLimit } = usePagination(1, 24);
+  const [category, setCategory] = useState('');
+  const [selected, setSelected] = useState(null);
 
-  const { data: rawData, loading, refetch } = useApiQuery(
-    productService.getProducts,
-    { page, limit, search, category: categoryFilter },
-    { immediate: true }
-  );
+  const load = () => {
+    setLoading(true);
+    setError(null);
+    productService.getProducts({ limit: 200 })
+      .then((res) => { setProducts(normalizeList(res)); setLoading(false); })
+      .catch((e) => { setError(e?.message || 'Product catalog unavailable.'); setLoading(false); });
+  };
+  useEffect(load, []);
 
-  const products = useMemo(() => normalizeList(rawData), [rawData]);
-  const pagination = useMemo(() => normalizePagination(rawData, products, page, limit), [rawData, products, page, limit]);
+  const categories = useMemo(() => {
+    const map = {};
+    products.forEach((p) => {
+      const key = p.category_name || 'Uncategorised';
+      map[key] = (map[key] || 0) + 1;
+    });
+    return Object.entries(map).sort((a, b) => b[1] - a[1]);
+  }, [products]);
+
+  const filtered = useMemo(() => products.filter((p) => {
+    const q = search.trim().toLowerCase();
+    const match = !q || [p.product_name, p.sku, p.brand_name].some((v) => String(v || '').toLowerCase().includes(q));
+    return match && (!category || p.category_name === category);
+  }), [products, search, category]);
 
   const stats = useMemo(() => {
-    let active = 0, totalValue = 0, categories = new Set();
-    products.forEach(p => {
-      if (p.status === 'active' || p.is_active !== false) active++;
-      totalValue += Number(p.unit_price || 0);
-      if (p.category) categories.add(p.category);
-    });
-    return {
-      total: pagination.total || products.length,
-      active,
-      categories: categories.size,
-      avgPrice: products.length > 0 ? totalValue / products.length : 0
-    };
-  }, [products, pagination.total]);
-
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: { opacity: 1, transition: { staggerChildren: 0.04, delayChildren: 0.1 } }
-  };
-
-  const itemVariants = {
-    hidden: { opacity: 0, y: 8 },
-    visible: { opacity: 1, y: 0, transition: { duration: 0.4 } }
-  };
-
-  const cardVariants = {
-    hidden: { opacity: 0, scale: 0.95 },
-    visible: { opacity: 1, scale: 1, transition: { duration: 0.3 } },
-    hover: { y: -6, transition: { duration: 0.2 } }
-  };
+    const active = filtered.filter((p) => p.status === 'ACTIVE').length;
+    const avg = filtered.length ? filtered.reduce((s, p) => s + Number(p.unit_price || 0), 0) / filtered.length : 0;
+    const top = filtered.reduce((m, p) => (Number(p.unit_price) > Number(m.unit_price) ? p : m), filtered[0] || {});
+    return { active, avg, top };
+  }, [filtered]);
 
   return (
-    <motion.div
-      className="products-page"
-      initial="hidden"
-      animate="visible"
-      variants={containerVariants}
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--space-6)',
-        minHeight: '100vh'
-      }}
-    >
-      {/* Premium Header */}
-      <motion.div variants={itemVariants}>
-        <div
-          style={{
-            background: 'linear-gradient(135deg, var(--color-bg-elevated) 0%, var(--color-bg-card) 100%)',
-            borderRadius: 'var(--radius-2xl)',
-            padding: 'var(--space-6)',
-            border: '1px solid var(--color-border-default)',
-            boxShadow: 'var(--shadow-card)',
-            position: 'relative',
-            overflow: 'hidden'
-          }}
-        >
-          <div
-            style={{
-              position: 'absolute',
-              top: '-30px',
-              right: '-30px',
-              width: '150px',
-              height: '150px',
-              background: 'radial-gradient(circle, rgba(59, 130, 246, 0.1) 0%, transparent 70%)',
-              borderRadius: '50%',
-              pointerEvents: 'none'
-            }}
-          />
-
-          <div style={{ position: 'relative', zIndex: 1 }}>
-            <div
-              style={{
-                fontSize: '11px',
-                fontWeight: 700,
-                textTransform: 'uppercase',
-                letterSpacing: '0.15em',
-                color: 'var(--color-accent-blue)',
-                marginBottom: 'var(--space-2)'
-              }}
-            >
-              MASTER DATA & CATALOG
-            </div>
-            <h1
-              style={{
-                fontSize: 'var(--font-size-4xl)',
-                fontWeight: 800,
-                color: 'var(--color-text-primary)',
-                letterSpacing: '-0.02em',
-                marginBottom: 'var(--space-2)'
-              }}
-            >
-              Product Master Catalog
-            </h1>
-            <p
-              style={{
-                fontSize: 'var(--font-size-sm)',
-                color: 'var(--color-text-secondary)',
-                maxWidth: '600px'
-              }}
-            >
-              Comprehensive SKU repository with pricing, categories, technical specifications, and inventory valuations
-            </p>
-          </div>
-        </div>
+    <motion.div className="page" variants={pageStagger} initial="hidden" animate="visible">
+      <motion.div variants={riseIn}>
+        <PageHeader
+          eyebrow="MASTER DATA / CATALOGUE"
+          title="Products & SKUs"
+          description="The commercial catalogue behind every stock record, order line and purchase order."
+          actions={<button className="btn btn-outline" onClick={load}><RefreshCw size={11} className={loading ? 'animate-spin' : ''} /> Refresh</button>}
+        />
       </motion.div>
 
-      {/* KPI Grid */}
-      <motion.div
-        variants={itemVariants}
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: 'var(--space-4)'
-        }}
-      >
-        {[
-          { label: 'Total SKUs', value: stats.total, icon: Package, color: 'var(--color-info-text)' },
-          { label: 'Active Products', value: stats.active, icon: TrendingUp, color: 'var(--color-success-text)' },
-          { label: 'Categories', value: stats.categories, icon: Layers, color: 'var(--color-accent-blue)' },
-          { label: 'Avg Unit Price', value: formatCurrency(stats.avgPrice), icon: DollarSign, color: 'var(--color-warning-text)' }
-        ].map((kpi, idx) => (
-          <motion.div
-            key={idx}
-            whileHover={{ y: -2 }}
-            style={{
-              padding: 'var(--space-4)',
-              background: 'var(--color-bg-card)',
-              border: '1px solid var(--color-border-default)',
-              borderRadius: 'var(--radius-lg)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 'var(--space-2)'
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <span
-                style={{
-                  fontSize: '10.5px',
-                  fontWeight: 700,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  color: 'var(--color-text-muted)'
-                }}
-              >
-                {kpi.label}
-              </span>
-              <kpi.icon size={16} style={{ color: kpi.color, opacity: 0.6 }} />
-            </div>
-            <div
-              style={{
-                fontSize: 'var(--font-size-2xl)',
-                fontWeight: 800,
-                color: kpi.color,
-                fontFamily: 'var(--font-mono)'
-              }}
-            >
-              {typeof kpi.value === 'number' ? formatNumber(kpi.value) : kpi.value}
-            </div>
-          </motion.div>
-        ))}
+      <motion.div variants={riseIn}>
+        <StatGrid cols={4}>
+          <Stat label="Catalogue" value={formatNumber(products.length)} meta="Distinct SKUs" icon={Package} />
+          <Stat label="Active" value={formatNumber(stats.active)} meta="Available for sale" tone="good" />
+          <Stat label="Average price" value={formatCurrency(stats.avg)} meta="Across filtered SKUs" />
+          <Stat label="Top price" value={formatCurrency(stats.top?.unit_price || 0)} meta={stats.top?.sku || '—'} icon={Tag} />
+        </StatGrid>
       </motion.div>
 
-      {/* Control Bar */}
-      <motion.div
-        variants={itemVariants}
-        style={{
-          display: 'flex',
-          gap: 'var(--space-3)',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap'
-        }}
-      >
-        <div style={{ display: 'flex', gap: 'var(--space-2)', flex: 1, minWidth: '300px' }}>
-          <div style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center' }}>
-            <Search size={14} style={{ position: 'absolute', left: '0.75rem', color: 'var(--color-text-muted)' }} />
-            <input
-              type="text"
-              placeholder="Search by name, SKU, or barcode..."
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setPage(1);
-              }}
-              style={{
-                width: '100%',
-                paddingLeft: '2.2rem',
-                padding: '0.6rem 0.75rem',
-                backgroundColor: 'var(--color-bg-card)',
-                border: '1px solid var(--color-border-default)',
-                borderRadius: 'var(--radius-md)',
-                fontSize: 'var(--font-size-sm)',
-                color: 'var(--color-text-primary)'
-              }}
-            />
-          </div>
-        </div>
-
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          onClick={refetch}
-          style={{
-            padding: '0.6rem 1.2rem',
-            backgroundColor: 'rgba(59, 130, 246, 0.15)',
-            border: '1px solid var(--color-accent-blue)',
-            borderRadius: 'var(--radius-lg)',
-            color: 'var(--color-accent-blue)',
-            fontSize: 'var(--font-size-xs)',
-            fontWeight: 600,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem'
-          }}
-        >
-          <RefreshCw size={14} />
-          Refresh
-        </motion.button>
-      </motion.div>
-
-      {/* Products Grid */}
-      <motion.div
-        variants={itemVariants}
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-          gap: 'var(--space-4)',
-          flex: 1
-        }}
-      >
-        <AnimatePresence>
-          {loading ? (
-            <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: 'var(--space-8)', color: 'var(--color-text-muted)' }}>
-              Loading products...
+      <div className="split split-aside">
+        <motion.div variants={riseIn} style={{ minWidth: 0 }}>
+          <Panel>
+            <div className="toolbar">
+              <div className="toolbar-group">
+                <label className="search-field">
+                  <Search size={12} />
+                  <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="SKU, product or brand…" />
+                  {search && <button onClick={() => setSearch('')}><X size={11} /></button>}
+                </label>
+                <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ height: 30, fontSize: 11 }}>
+                  <option value="">All categories</option>
+                  {categories.map(([c]) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <span className="mono" style={{ fontSize: 9.5, color: 'var(--color-text-muted)' }}>{filtered.length} SKUS</span>
             </div>
-          ) : products.length === 0 ? (
-            <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: 'var(--space-8)', color: 'var(--color-text-muted)' }}>
-              No products found
-            </div>
-          ) : (
-            products.map((product, idx) => (
-              <motion.div
-                key={product.product_id || idx}
-                variants={cardVariants}
-                whileHover="hover"
-                initial="hidden"
-                animate="visible"
-                exit={{ opacity: 0, scale: 0.95 }}
-                onClick={() => setSelectedProduct(product)}
-                style={{
-                  padding: 'var(--space-4)',
-                  background: 'var(--color-bg-card)',
-                  border: '1px solid var(--color-border-default)',
-                  borderRadius: 'var(--radius-xl)',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 'var(--space-3)',
-                  transition: 'all var(--transition-fast)'
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <h3 style={{ fontSize: 'var(--font-size-lg)', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '0.25rem', lineHeight: 1.2 }}>
-                      {product.name}
-                    </h3>
-                    <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
-                      {product.sku}
-                    </span>
-                  </div>
-                  <span style={{
-                    padding: '0.25rem 0.6rem',
-                    backgroundColor: product.status === 'active' || product.is_active !== false ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                    color: product.status === 'active' || product.is_active !== false ? 'var(--color-success-text)' : 'var(--color-danger-text)',
-                    borderRadius: 'var(--radius-sm)',
-                    fontSize: '9px',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
-                    whiteSpace: 'nowrap'
-                  }}>
-                    {product.status === 'active' || product.is_active !== false ? 'Active' : 'Inactive'}
-                  </span>
-                </div>
 
-                {product.category && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <Tag size={12} style={{ color: 'var(--color-accent-blue)', opacity: 0.7 }} />
-                    <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
-                      {product.category}
-                    </span>
-                  </div>
-                )}
-
-                <div style={{ height: '1px', backgroundColor: 'var(--color-border-subtle)' }} />
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-2)' }}>
-                  <div style={{ backgroundColor: 'var(--color-bg-secondary)', padding: 'var(--space-2)', borderRadius: 'var(--radius-md)', textAlign: 'center' }}>
-                    <div style={{ fontSize: '9px', color: 'var(--color-text-muted)', fontWeight: 600, marginBottom: '0.25rem' }}>Unit Price</div>
-                    <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 700, color: 'var(--color-accent-blue)', fontFamily: 'var(--font-mono)' }}>
-                      {formatCurrency(product.unit_price || product.price || 0)}
-                    </div>
-                  </div>
-                  <div style={{ backgroundColor: 'var(--color-bg-secondary)', padding: 'var(--space-2)', borderRadius: 'var(--radius-md)', textAlign: 'center' }}>
-                    <div style={{ fontSize: '9px', color: 'var(--color-text-muted)', fontWeight: 600, marginBottom: '0.25rem' }}>Cost Price</div>
-                    <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 700, color: 'var(--color-text-secondary)', fontFamily: 'var(--font-mono)' }}>
-                      {formatCurrency(product.cost_price || 0)}
-                    </div>
-                  </div>
-                </div>
-
-                {product.description && (
-                  <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)', lineHeight: 1.4, display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden' }}>
-                    {product.description}
-                  </p>
-                )}
-              </motion.div>
-            ))
-          )}
-        </AnimatePresence>
-      </motion.div>
-
-      {/* Pagination */}
-      {!loading && products.length > 0 && (
-        <motion.div
-          variants={itemVariants}
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            padding: 'var(--space-4)',
-            backgroundColor: 'var(--color-bg-card)',
-            borderRadius: 'var(--radius-lg)',
-            border: '1px solid var(--color-border-default)',
-            fontSize: 'var(--font-size-xs)',
-            color: 'var(--color-text-secondary)'
-          }}
-        >
-          <span>
-            Showing {(page - 1) * limit + 1} - {Math.min(page * limit, pagination.total || 0)} of{' '}
-            {formatNumber(pagination.total || products.length)}
-          </span>
-          <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              disabled={page === 1}
-              onClick={() => setPage(Math.max(1, page - 1))}
-              style={{
-                padding: '0.4rem 0.8rem',
-                backgroundColor: page === 1 ? 'var(--color-bg-secondary)' : 'var(--color-accent-blue)',
-                color: page === 1 ? 'var(--color-text-muted)' : 'white',
-                border: 'none',
-                borderRadius: 'var(--radius-md)',
-                cursor: page === 1 ? 'not-allowed' : 'pointer',
-                fontWeight: 600,
-                fontSize: 'var(--font-size-xs)'
-              }}
-            >
-              Previous
-            </motion.button>
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              disabled={!pagination.hasNext && page > 1}
-              onClick={() => setPage(page + 1)}
-              style={{
-                padding: '0.4rem 0.8rem',
-                backgroundColor: !pagination.hasNext && page > 1 ? 'var(--color-bg-secondary)' : 'var(--color-accent-blue)',
-                color: !pagination.hasNext && page > 1 ? 'var(--color-text-muted)' : 'white',
-                border: 'none',
-                borderRadius: 'var(--radius-md)',
-                cursor: !pagination.hasNext && page > 1 ? 'not-allowed' : 'pointer',
-                fontWeight: 600,
-                fontSize: 'var(--font-size-xs)'
-              }}
-            >
-              Next
-            </motion.button>
-          </div>
+            {error ? (
+              <div style={{ padding: 30, textAlign: 'center', color: 'var(--color-danger-text)', fontSize: 11 }}>{error}</div>
+            ) : (
+              <div className="table-scroll tall">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>SKU</th>
+                      <th>Product</th>
+                      <th>Category</th>
+                      <th>Brand</th>
+                      <th style={{ textAlign: 'right' }}>Unit price</th>
+                      <th style={{ textAlign: 'right' }}>Weight</th>
+                      <th style={{ textAlign: 'right' }}>Reorder</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loading && Array.from({ length: 8 }).map((_, i) => (
+                      <tr key={i}>{Array.from({ length: 8 }).map((__, j) => <td key={j}><div className="skeleton" style={{ height: 9 }} /></td>)}</tr>
+                    ))}
+                    {!loading && filtered.map((p) => (
+                      <tr key={p.product_id} className="clickable" onClick={() => setSelected(p)}>
+                        <td className="mono" style={{ fontSize: 10, color: 'var(--color-text-secondary)' }}>{p.sku}</td>
+                        <td className="cell-strong">{p.product_name}</td>
+                        <td>{p.category_name || '—'}</td>
+                        <td>{p.brand_name || '—'}</td>
+                        <td className="num" style={{ textAlign: 'right' }}>{formatCurrency(p.unit_price)}</td>
+                        <td className="mono" style={{ textAlign: 'right', color: 'var(--color-text-muted)' }}>{p.weight_kg ? `${p.weight_kg} kg` : '—'}</td>
+                        <td className="mono" style={{ textAlign: 'right' }}>{formatNumber(p.reorder_level)}</td>
+                        <td><StatusBadge status={p.status || 'ACTIVE'} size="sm" /></td>
+                      </tr>
+                    ))}
+                    {!loading && filtered.length === 0 && (
+                      <tr><td colSpan={8} style={{ padding: 40, textAlign: 'center', color: 'var(--color-text-muted)' }}>No products match this filter.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Panel>
         </motion.div>
-      )}
 
-      {/* Detail Panel */}
-      <AnimatePresence>
-        {selectedProduct && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setSelectedProduct(null)}
-            style={{
-              position: 'fixed',
-              inset: 0,
-              backgroundColor: 'rgba(0, 0, 0, 0.5)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'flex-end',
-              zIndex: 50
-            }}
-          >
-            <motion.div
-              initial={{ x: 500, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={{ x: 500, opacity: 0 }}
-              onClick={(e) => e.stopPropagation()}
-              style={{
-                width: '400px',
-                background: 'var(--color-bg-card)',
-                borderLeft: '1px solid var(--color-border-default)',
-                boxShadow: 'var(--shadow-card)',
-                display: 'flex',
-                flexDirection: 'column',
-                height: '100%',
-                maxHeight: '100%'
-              }}
-            >
-              <div style={{ padding: 'var(--space-4)', borderBottom: '1px solid var(--color-border-subtle)' }}>
-                <h3 style={{ fontSize: 'var(--font-size-lg)', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: 'var(--space-2)' }}>
-                  {selectedProduct.name}
-                </h3>
-                <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
-                  SKU: {selectedProduct.sku}
-                </p>
-              </div>
-
-              <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-                {selectedProduct.description && (
-                  <div style={{
-                    padding: 'var(--space-3)',
-                    backgroundColor: 'var(--color-bg-secondary)',
-                    borderRadius: 'var(--radius-lg)',
-                    border: '1px solid var(--color-border-subtle)'
-                  }}>
-                    <span style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-muted)', display: 'block', marginBottom: '0.5rem' }}>
-                      Description
-                    </span>
-                    <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
-                      {selectedProduct.description}
-                    </p>
+        <motion.div variants={riseIn} style={{ display: 'grid', gap: 14, alignContent: 'start' }}>
+          <Panel>
+            <PanelHead title="Catalogue composition" subtitle="SKU count by category" action={<Layers size={12} style={{ color: 'var(--color-text-muted)' }} />} />
+            <PanelBody style={{ display: 'grid', gap: 11 }}>
+              {categories.map(([name, count]) => (
+                <div key={name}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <button
+                      onClick={() => setCategory(name)}
+                      style={{ fontSize: 10.5, color: category === name ? 'var(--color-accent-hover)' : 'var(--color-text-secondary)' }}
+                    >
+                      {name}
+                    </button>
+                    <span className="mono" style={{ fontSize: 9.5, color: 'var(--color-text-muted)' }}>{count}</span>
                   </div>
-                )}
+                  <Meter value={(count / Math.max(1, products.length)) * 100} />
+                </div>
+              ))}
+              {categories.length === 0 && !loading && <div style={{ fontSize: 10.5, color: 'var(--color-text-muted)' }}>No categories returned.</div>}
+            </PanelBody>
+          </Panel>
 
-                {[
-                  { label: 'Category', value: selectedProduct.category },
-                  { label: 'Unit Price', value: formatCurrency(selectedProduct.unit_price || 0) },
-                  { label: 'Cost Price', value: formatCurrency(selectedProduct.cost_price || 0) },
-                  { label: 'Status', value: selectedProduct.status || 'Active' },
-                  { label: 'Barcode', value: selectedProduct.barcode }
-                ].map((row, idx) => (
-                  row.value && (
-                    <div key={idx} style={{
-                      padding: 'var(--space-3)',
-                      backgroundColor: 'var(--color-bg-secondary)',
-                      borderRadius: 'var(--radius-lg)',
-                      border: '1px solid var(--color-border-subtle)'
-                    }}>
-                      <span style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-muted)', display: 'block', marginBottom: '0.25rem' }}>
-                        {row.label}
-                      </span>
-                      <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-primary)' }}>
-                        {row.value}
-                      </span>
-                    </div>
-                  )
-                ))}
-              </div>
-
-              <div style={{ padding: 'var(--space-4)', borderTop: '1px solid var(--color-border-subtle)' }}>
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  onClick={() => setSelectedProduct(null)}
-                  style={{
-                    width: '100%',
-                    padding: '0.6rem',
-                    backgroundColor: 'var(--color-bg-secondary)',
-                    color: 'var(--color-text-primary)',
-                    border: '1px solid var(--color-border-default)',
-                    borderRadius: 'var(--radius-md)',
-                    fontWeight: 600,
-                    fontSize: 'var(--font-size-xs)',
-                    cursor: 'pointer'
-                  }}
-                >
-                  Close
-                </motion.button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          <Panel>
+            <PanelHead title="SKU inspector" subtitle={selected ? selected.sku : 'Select a catalogue row'} />
+            <PanelBody>
+              {!selected ? (
+                <div style={{ fontSize: 10.5, color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
+                  Select a SKU to inspect pricing, handling characteristics and replenishment thresholds.
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gap: 8 }}>
+                  <div style={{ fontSize: 12, fontWeight: 560 }}>{selected.product_name}</div>
+                  <div style={{ fontSize: 9.5, color: 'var(--color-text-muted)', lineHeight: 1.5 }}>{selected.description || 'No description recorded.'}</div>
+                  <Row label="Category" value={selected.category_name} />
+                  <Row label="Brand" value={selected.brand_name} />
+                  <Row label="Unit price" value={formatCurrency(selected.unit_price)} />
+                  <Row label="Weight" value={selected.weight_kg ? `${selected.weight_kg} kg` : '—'} />
+                  <Row label="Reorder level" value={formatNumber(selected.reorder_level)} />
+                  <Row label="Status" value={selected.status} />
+                </div>
+              )}
+            </PanelBody>
+          </Panel>
+        </motion.div>
+      </div>
     </motion.div>
+  );
+}
+
+function Row({ label, value }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, paddingBottom: 6, borderBottom: '1px solid var(--color-border-subtle)' }}>
+      <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>{label}</span>
+      <span style={{ fontSize: 10.5, color: 'var(--color-text-primary)', textAlign: 'right' }}>{value || '—'}</span>
+    </div>
   );
 }
 

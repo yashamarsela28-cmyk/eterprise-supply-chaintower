@@ -1,670 +1,277 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Receipt, Plus, RefreshCw, DollarSign, Calendar, CheckCircle, XCircle, CreditCard } from 'lucide-react';
-import { useApiQuery } from '../hooks/useApiQuery';
-import { usePagination } from '../hooks/usePagination';
+import React, { useEffect, useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
+import { RefreshCw, Search, X, Plus, Receipt, CircleDollarSign, AlertTriangle, CheckCircle } from 'lucide-react';
 import * as invoiceService from '../services/invoiceService';
-import * as orderService from '../services/orderService';
-import * as customerService from '../services/customerService';
 import * as paymentService from '../services/paymentService';
-import { normalizeList, normalizePagination } from '../utils/responseNormalizer';
+import * as orderService from '../services/orderService';
+import { normalizeList } from '../utils/responseNormalizer';
 import { useToast } from '../context/ToastContext';
 import { PageHeader } from '../components/common/PageHeader';
-import { FilterBar } from '../components/common/FilterBar';
-import { Table } from '../components/common/Table';
-import { Pagination } from '../components/common/Pagination';
-import { Select } from '../components/common/Select';
-import { Input } from '../components/common/Input';
-import { Button } from '../components/common/Button';
+import { Panel, PanelBody, Stat, StatGrid, Meter } from '../components/common/Panel';
+import { StatusBadge } from '../components/common/StatusBadge';
 import { Drawer } from '../components/common/Drawer';
 import { Modal } from '../components/common/Modal';
-import { StatusBadge } from '../components/common/StatusBadge';
-import { formatCurrency, formatDate, formatNumber } from '../utils/formatters';
+import { Button } from '../components/common/Button';
+import { Input } from '../components/common/Input';
+import { Select } from '../components/common/Select';
+import { formatCurrency, formatDate, formatNumber, formatPercentage } from '../utils/formatters';
+import { pageStagger, riseIn } from '../utils/motion';
 
 export function InvoicesPage() {
   const toast = useToast();
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [selectedInvoice, setSelectedInvoice] = useState(null);
-  const [actionLoading, setActionLoading] = useState(false);
-
-  // Create Invoice Modal
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [createSubmitting, setCreateSubmitting] = useState(false);
-  const [customers, setCustomers] = useState([]);
+  const [status, setStatus] = useState('');
+  const [selected, setSelected] = useState(null);
   const [orders, setOrders] = useState([]);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [form, setForm] = useState({ sales_order_id: '', due_date: '', discount_amount: 0 });
+  const [payOpen, setPayOpen] = useState(false);
+  const [pay, setPay] = useState({ amount: '', payment_method: 'BANK_TRANSFER', transaction_reference: '', notes: '' });
+  const [submitting, setSubmitting] = useState(false);
 
-  const [newInvoice, setNewInvoice] = useState({
-    customer_id: '',
-    sales_order_id: '',
-    subtotal: 1000.00,
-    tax_amount: 80.00,
-    discount_amount: 0.00,
-    due_date: ''
-  });
+  const load = () => {
+    setLoading(true); setError(null);
+    invoiceService.getInvoices({ limit: 200 })
+      .then((res) => { setRows(normalizeList(res)); setLoading(false); })
+      .catch((e) => { setError(e?.message || 'Billing service unavailable.'); setLoading(false); });
+  };
+  useEffect(load, []);
 
-  // Record Payment Modal from Invoice Drawer
-  const [isPayModalOpen, setIsPayModalOpen] = useState(false);
-  const [paySubmitting, setPaySubmitting] = useState(false);
-  const [payForm, setPayForm] = useState({
-    amount: 1000.00,
-    payment_method: 'ACH',
-    payment_reference: '',
-    notes: 'Settlement for invoice'
-  });
+  const filtered = useMemo(() => rows.filter((r) => {
+    const q = search.trim().toLowerCase();
+    const match = !q || [r.invoice_number, r.customer_name, r.order_number].some((v) => String(v || '').toLowerCase().includes(q));
+    return match && (!status || r.status === status);
+  }), [rows, search, status]);
 
-  const { page, limit, setPage, setLimit } = usePagination(1, 20);
+  const stats = useMemo(() => filtered.reduce((a, r) => {
+    if (r.status === 'CANCELLED') return a;
+    a.invoiced += Number(r.total_amount || 0);
+    a.paid += Number(r.paid_amount || 0);
+    a.outstanding += Number(r.outstanding_amount || 0);
+    if (r.status === 'OVERDUE') a.overdue += 1;
+    return a;
+  }, { invoiced: 0, paid: 0, outstanding: 0, overdue: 0 }), [filtered]);
 
-  const { data: rawData, loading, error, refetch } = useApiQuery(
-    invoiceService.getInvoices,
-    { page, limit, search, status: statusFilter },
-    { immediate: true }
-  );
+  const openCreate = async () => {
+    setCreateOpen(true);
+    if (!orders.length) {
+      try {
+        const res = await orderService.getOrders({ limit: 100 });
+        setOrders(normalizeList(res));
+        const first = normalizeList(res)[0];
+        if (first) setForm((f) => ({ ...f, sales_order_id: first.sales_order_id }));
+      } catch (e) { toast.error(e?.message || 'Could not load sales orders.'); }
+    }
+  };
 
-  const invoices = useMemo(() => normalizeList(rawData), [rawData]);
-  const pagination = useMemo(() => normalizePagination(rawData, invoices, page, limit), [rawData, invoices, page, limit]);
-
-  // Compute live summary stats
-  const summaryStats = useMemo(() => {
-    let totalReceivables = 0;
-    let totalSettled = 0;
-    let outstandingCount = 0;
-
-    invoices.forEach((inv) => {
-      const tot = Number(inv.total_amount || 0);
-      const paid = Number(inv.paid_amount || 0);
-      totalReceivables += tot;
-      totalSettled += paid;
-
-      const st = (inv.status || '').toUpperCase();
-      if (st === 'ISSUED' || st === 'PARTIALLY_PAID' || st === 'OVERDUE') {
-        outstandingCount += 1;
-      }
-    });
-
-    return {
-      total: pagination.total || invoices.length,
-      outstanding: outstandingCount,
-      totalReceivables,
-      totalSettled
-    };
-  }, [invoices, pagination.total]);
-
-  useEffect(() => {
-    if (isCreateOpen) {
-      Promise.all([
-        customerService.getCustomers({ limit: 50 }).catch(() => ({ data: [] })),
-        orderService.getOrders({ limit: 50 }).catch(() => ({ data: [] }))
-      ]).then(([custRes, ordRes]) => {
-        const custs = normalizeList(custRes);
-        const ords = normalizeList(ordRes);
-        setCustomers(custs);
-        setOrders(ords);
-
-        setNewInvoice((prev) => ({
-          ...prev,
-          customer_id: prev.customer_id || (custs[0]?.customer_id || custs[0]?.id || 1),
-          sales_order_id: prev.sales_order_id || (ords[0]?.sales_order_id || ords[0]?.id || 1),
-          due_date: prev.due_date || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
-        }));
+  const submitInvoice = async () => {
+    if (!form.sales_order_id) { toast.error('Select a sales order.'); return; }
+    setSubmitting(true);
+    try {
+      await invoiceService.createInvoice({
+        sales_order_id: Number(form.sales_order_id),
+        due_date: form.due_date || undefined,
+        discount_amount: Number(form.discount_amount) || 0
       });
-    }
-  }, [isCreateOpen]);
-
-  // Status Action Handler
-  const handleStatusChange = async (targetStatus) => {
-    if (!selectedInvoice) return;
-    const invId = selectedInvoice.invoice_id || selectedInvoice.id;
-    setActionLoading(true);
-
-    try {
-      const res = await invoiceService.updateInvoiceStatus(invId, targetStatus);
-      toast.success(`Invoice #${selectedInvoice.invoice_number || invId} marked as ${targetStatus}`);
-      setSelectedInvoice(res?.data || { ...selectedInvoice, status: targetStatus });
-      refetch();
-    } catch (err) {
-      toast.error(err.response?.data?.message || err.message || 'Failed to update invoice');
-    } finally {
-      setActionLoading(false);
-    }
+      toast.success('Invoice issued.');
+      setCreateOpen(false); load();
+    } catch (e) { toast.error(e?.message || 'Invoice creation failed.'); }
+    finally { setSubmitting(false); }
   };
 
-  // Create Invoice Submission
-  const handleCreateSubmit = async (e) => {
-    e.preventDefault();
-    if (!newInvoice.customer_id) {
-      toast.error('Please select a customer');
-      return;
-    }
-
-    setCreateSubmitting(true);
-    try {
-      const subtotal = Number(newInvoice.subtotal) || 0;
-      const tax = Number(newInvoice.tax_amount) || 0;
-      const discount = Number(newInvoice.discount_amount) || 0;
-      const total = Math.max(0, subtotal + tax - discount);
-
-      const payload = {
-        customer_id: Number(newInvoice.customer_id),
-        sales_order_id: newInvoice.sales_order_id ? Number(newInvoice.sales_order_id) : undefined,
-        subtotal,
-        tax_amount: tax,
-        discount_amount: discount,
-        total_amount: total,
-        due_date: newInvoice.due_date || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
-      };
-
-      const res = await invoiceService.createInvoice(payload);
-      toast.success(`Invoice #${res?.data?.invoice_number || ''} generated successfully`);
-      setIsCreateOpen(false);
-      refetch();
-    } catch (err) {
-      toast.error(err.response?.data?.message || err.message || 'Failed to create invoice');
-    } finally {
-      setCreateSubmitting(false);
-    }
-  };
-
-  // Record Payment against Selected Invoice
-  const handlePaymentSubmit = async (e) => {
-    e.preventDefault();
-    if (!selectedInvoice) return;
-    const invId = selectedInvoice.invoice_id || selectedInvoice.id;
-
-    setPaySubmitting(true);
-    try {
-      const payload = {
-        invoice_id: Number(invId),
-        amount: Number(payForm.amount) || 100,
-        payment_method: payForm.payment_method || 'ACH',
-        payment_reference: payForm.payment_reference || `PAY-${Date.now().toString().slice(-6)}`,
-        notes: payForm.notes || 'Commercial settlement'
-      };
-
-      await paymentService.recordPayment(payload);
-      toast.success('Payment recorded successfully. Invoice balance updated.');
-      setIsPayModalOpen(false);
-
-      // Refresh invoice
-      const updated = await invoiceService.getInvoiceById(invId);
-      if (updated?.data) setSelectedInvoice(updated.data);
-      refetch();
-    } catch (err) {
-      toast.error(err.response?.data?.message || err.message || 'Failed to record payment');
-    } finally {
-      setPaySubmitting(false);
-    }
-  };
-
-  const openPaymentModal = () => {
-    const total = Number(selectedInvoice?.total_amount) || 0;
-    const paid = Number(selectedInvoice?.paid_amount) || 0;
-    const remaining = Math.max(0, total - paid);
-    setPayForm({
-      amount: remaining || total || 100,
-      payment_method: 'ACH',
-      payment_reference: `PAY-${Date.now().toString().slice(-6)}`,
-      notes: `Settlement for invoice ${selectedInvoice?.invoice_number || ''}`
+  const openPay = () => {
+    if (!selected) return;
+    setPay({
+      amount: selected.outstanding_amount || '',
+      payment_method: 'BANK_TRANSFER',
+      transaction_reference: '',
+      notes: ''
     });
-    setIsPayModalOpen(true);
+    setPayOpen(true);
   };
 
-  const columns = [
-    {
-      key: 'invoice_number',
-      header: 'Invoice Reference',
-      render: (r) => (
-        <div>
-          <div style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
-            {r.invoice_number || `INV-${r.invoice_id || r.id}`}
-          </div>
-          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '0.15rem' }}>
-            Issued: <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-secondary)' }}>{formatDate(r.invoice_date || r.created_at)}</span>
-          </div>
-        </div>
-      )
-    },
-    {
-      key: 'customer',
-      header: 'Billed Customer Entity',
-      render: (r) => (
-        <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-primary)', fontWeight: 500 }}>
-          {r.customers?.name || r.customers?.customer_name || r.customer_name || `Customer #${r.customer_id}`}
-        </span>
-      )
-    },
-    {
-      key: 'due_date',
-      header: 'Maturity / Due Date',
-      render: (r) => (
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
-          {formatDate(r.due_date)}
-        </span>
-      )
-    },
-    {
-      key: 'total_amount',
-      header: 'Gross Total',
-      align: 'right',
-      render: (r) => (
-        <span style={{ fontWeight: 600, fontFamily: 'var(--font-mono)', color: 'var(--color-text-primary)' }}>
-          {formatCurrency(r.total_amount || 0)}
-        </span>
-      )
-    },
-    {
-      key: 'paid_amount',
-      header: 'Settled Balance',
-      align: 'right',
-      render: (r) => (
-        <span style={{ fontFamily: 'var(--font-mono)', color: (r.paid_amount || 0) >= (r.total_amount || 1) ? 'var(--color-success-text)' : 'var(--color-text-secondary)' }}>
-          {formatCurrency(r.paid_amount || 0)}
-        </span>
-      )
-    },
-    {
-      key: 'status',
-      header: 'Billing State',
-      render: (r) => <StatusBadge status={r.status || 'DRAFT'} size="sm" />
-    }
-  ];
-
-  const currentStatus = (selectedInvoice?.status || '').toUpperCase();
+  const submitPayment = async () => {
+    if (!selected || !Number(pay.amount)) { toast.error('Enter a payment amount.'); return; }
+    setSubmitting(true);
+    try {
+      await paymentService.recordPayment({
+        invoice_id: selected.invoice_id,
+        amount: Number(pay.amount),
+        payment_method: pay.payment_method,
+        transaction_reference: pay.transaction_reference || undefined,
+        notes: pay.notes
+      });
+      toast.success(`Payment recorded for ${selected.invoice_number}.`);
+      setPayOpen(false); setSelected(null); load();
+    } catch (e) { toast.error(e?.message || 'Payment could not be recorded.'); }
+    finally { setSubmitting(false); }
+  };
 
   return (
-    <div className="invoices-page animate-fade-in">
-      <PageHeader
-        eyebrow="FINANCE // RECEIVABLES"
-        title="Invoices & Commercial Billing"
-        description="Accounts receivable ledger, automated billing generation, payment maturity, and collection tracking."
-        actions={
-          <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-            <Button
-              variant="outline"
-              size="sm"
-              icon={RefreshCw}
-              onClick={refetch}
-            >
-              Refresh Receivables
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              icon={Plus}
-              onClick={() => setIsCreateOpen(true)}
-            >
-              Generate Invoice
-            </Button>
-          </div>
-        }
-      />
-
-      {/* KPI Summary Strip */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: 'var(--space-3)',
-          marginBottom: 'var(--space-5)'
-        }}
-      >
-        <div
-          style={{
-            padding: '0.85rem 1.15rem',
-            backgroundColor: 'var(--color-bg-card)',
-            border: '1px solid var(--color-border-default)',
-            borderRadius: 'var(--radius-lg)'
-          }}
-        >
-          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Invoices Issued
-          </span>
-          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
-            {formatNumber(summaryStats.total)}
-          </div>
-        </div>
-
-        <div
-          style={{
-            padding: '0.85rem 1.15rem',
-            backgroundColor: 'var(--color-bg-card)',
-            border: '1px solid var(--color-border-default)',
-            borderRadius: 'var(--radius-lg)'
-          }}
-        >
-          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Outstanding Accounts
-          </span>
-          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-warning-text)', fontFamily: 'var(--font-mono)' }}>
-            {formatNumber(summaryStats.outstanding)}
-          </div>
-        </div>
-
-        <div
-          style={{
-            padding: '0.85rem 1.15rem',
-            backgroundColor: 'var(--color-bg-card)',
-            border: '1px solid var(--color-border-default)',
-            borderRadius: 'var(--radius-lg)'
-          }}
-        >
-          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Gross Invoiced Receivables
-          </span>
-          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
-            {formatCurrency(summaryStats.totalReceivables)}
-          </div>
-        </div>
-
-        <div
-          style={{
-            padding: '0.85rem 1.15rem',
-            backgroundColor: 'var(--color-bg-card)',
-            border: '1px solid var(--color-border-default)',
-            borderRadius: 'var(--radius-lg)'
-          }}
-        >
-          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Cash Collected
-          </span>
-          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-success-text)', fontFamily: 'var(--font-mono)' }}>
-            {formatCurrency(summaryStats.totalSettled)}
-          </div>
-        </div>
-      </div>
-
-      <FilterBar
-        search={search}
-        onSearchChange={(val) => {
-          setSearch(val);
-          setPage(1);
-        }}
-        searchPlaceholder="Filter by invoice number, customer entity..."
-        hasActiveFilters={Boolean(search || statusFilter)}
-        onReset={() => {
-          setSearch('');
-          setStatusFilter('');
-          setPage(1);
-        }}
-      >
-        <Select
-          value={statusFilter}
-          onChange={(e) => {
-            setStatusFilter(e.target.value);
-            setPage(1);
-          }}
-          options={[
-            { value: '', label: 'All Statuses' },
-            { value: 'DRAFT', label: 'Draft' },
-            { value: 'ISSUED', label: 'Issued' },
-            { value: 'PARTIALLY_PAID', label: 'Partially Paid' },
-            { value: 'PAID', label: 'Paid' },
-            { value: 'OVERDUE', label: 'Overdue' },
-            { value: 'CANCELLED', label: 'Cancelled' }
-          ]}
+    <motion.div className="page" variants={pageStagger} initial="hidden" animate="visible">
+      <motion.div variants={riseIn}>
+        <PageHeader
+          eyebrow="FINANCE / ACCOUNTS RECEIVABLE"
+          title="Invoices"
+          description="Billed value, settled cash and overdue exposure by customer account."
+          actions={
+            <>
+              <button className="btn btn-outline" onClick={load}><RefreshCw size={11} className={loading ? 'animate-spin' : ''} /> Refresh</button>
+              <button className="btn btn-primary" onClick={openCreate}><Plus size={11} /> New invoice</button>
+            </>
+          }
         />
-      </FilterBar>
+      </motion.div>
 
-      <Table
-        columns={columns}
-        data={invoices}
-        loading={loading}
-        onRowClick={(inv) => setSelectedInvoice(inv)}
-        emptyTitle="No Invoices Found"
-        emptyMessage="No commercial billing invoices matched your filter criteria."
-      />
+      <motion.div variants={riseIn}>
+        <StatGrid cols={4}>
+          <Stat label="Invoiced" value={formatCurrency(stats.invoiced)} meta={`${filtered.filter((r) => r.status !== 'CANCELLED').length} active invoices`} icon={Receipt} />
+          <Stat label="Collected" value={formatCurrency(stats.paid)} meta="Settled against invoices" tone="good" />
+          <Stat label="Outstanding" value={formatCurrency(stats.outstanding)} meta="Open receivable" tone="warn" icon={CircleDollarSign} />
+          <Stat label="Overdue" value={formatNumber(stats.overdue)} meta="Past due date" tone={stats.overdue ? 'bad' : ''} icon={AlertTriangle} />
+        </StatGrid>
+      </motion.div>
 
-      <Pagination
-        currentPage={page}
-        totalPages={pagination.totalPages || 1}
-        totalItems={pagination.total || invoices.length}
-        limit={limit}
-        onPageChange={setPage}
-        onLimitChange={setLimit}
-      />
-
-      {/* Invoice Drawer */}
-      <Drawer
-        isOpen={Boolean(selectedInvoice)}
-        onClose={() => setSelectedInvoice(null)}
-        title={selectedInvoice?.invoice_number || `Invoice #${selectedInvoice?.invoice_id || selectedInvoice?.id}`}
-        subtitle={`Customer: ${selectedInvoice?.customers?.name || selectedInvoice?.customers?.customer_name || 'Client'}`}
-      >
-        {selectedInvoice && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-            <div style={{ padding: '0.85rem 1rem', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
-                <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Billing Status</span>
-                <StatusBadge status={selectedInvoice.status || 'DRAFT'} size="sm" />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.5rem' }}>
-                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
-                  <span style={{ color: 'var(--color-text-muted)' }}>Subtotal:</span>{' '}
-                  <strong style={{ color: 'var(--color-text-primary)' }}>{formatCurrency(selectedInvoice.subtotal || 0)}</strong>
-                </div>
-                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
-                  <span style={{ color: 'var(--color-text-muted)' }}>Tax:</span>{' '}
-                  <strong style={{ color: 'var(--color-text-primary)' }}>{formatCurrency(selectedInvoice.tax_amount || 0)}</strong>
-                </div>
-                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
-                  <span style={{ color: 'var(--color-text-muted)' }}>Total:</span>{' '}
-                  <strong style={{ color: 'var(--color-text-primary)' }}>{formatCurrency(selectedInvoice.total_amount || 0)}</strong>
-                </div>
-                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-success-text)', fontWeight: 600 }}>
-                  <span style={{ color: 'var(--color-text-muted)' }}>Paid:</span>{' '}
-                  {formatCurrency(selectedInvoice.paid_amount || 0)}
-                </div>
-              </div>
-              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)', marginTop: '0.5rem', borderTop: '1px solid var(--color-border-subtle)', paddingTop: '0.4rem' }}>
-                <strong style={{ color: 'var(--color-text-muted)' }}>Due Date:</strong> {formatDate(selectedInvoice.due_date)}
-              </div>
+      <motion.div variants={riseIn}>
+        <Panel>
+          <div className="toolbar">
+            <div className="toolbar-group">
+              <label className="search-field">
+                <Search size={12} />
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Invoice, customer or order…" />
+                {search && <button onClick={() => setSearch('')}><X size={11} /></button>}
+              </label>
+              <select value={status} onChange={(e) => setStatus(e.target.value)} style={{ height: 30, fontSize: 11 }}>
+                <option value="">All statuses</option>
+                {['DRAFT', 'ISSUED', 'PARTIALLY_PAID', 'PAID', 'OVERDUE', 'CANCELLED'].map((s) => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
+              </select>
             </div>
+            <span className="mono" style={{ fontSize: 9.5, color: 'var(--color-text-muted)' }}>{filtered.length} INVOICES</span>
+          </div>
 
-            {/* Billing Operational Actions */}
-            <div style={{ padding: '0.85rem 1rem', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
-              <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--color-text-muted)', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                Billing Operations
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                {currentStatus === 'DRAFT' && (
-                  <>
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      icon={CheckCircle}
-                      loading={actionLoading}
-                      onClick={() => handleStatusChange('ISSUED')}
-                    >
-                      Issue Invoice
-                    </Button>
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      icon={XCircle}
-                      loading={actionLoading}
-                      onClick={() => handleStatusChange('CANCELLED')}
-                    >
-                      Cancel
-                    </Button>
-                  </>
-                )}
+          {error ? (
+            <div style={{ padding: 30, textAlign: 'center', color: 'var(--color-danger-text)', fontSize: 11 }}>{error}</div>
+          ) : (
+            <div className="table-scroll tall">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Invoice</th>
+                    <th>Customer</th>
+                    <th>Sales order</th>
+                    <th>Issued</th>
+                    <th>Due</th>
+                    <th style={{ textAlign: 'right' }}>Total</th>
+                    <th style={{ width: 120 }}>Settled</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading && Array.from({ length: 8 }).map((_, i) => (
+                    <tr key={i}>{Array.from({ length: 8 }).map((__, j) => <td key={j}><div className="skeleton" style={{ height: 9 }} /></td>)}</tr>
+                  ))}
+                  {!loading && filtered.map((r) => (
+                    <tr key={r.invoice_id} className="clickable" onClick={() => setSelected(r)}>
+                      <td className="mono" style={{ fontSize: 10 }}>{r.invoice_number}</td>
+                      <td>
+                        <div className="cell-strong">{r.customer_name}</div>
+                        <div className="cell-sub mono">{r.customer_code}</div>
+                      </td>
+                      <td className="mono" style={{ color: 'var(--color-text-secondary)' }}>{r.order_number}</td>
+                      <td className="mono" style={{ color: 'var(--color-text-muted)' }}>{formatDate(r.invoice_date)}</td>
+                      <td className="mono" style={{ color: 'var(--color-text-muted)' }}>{formatDate(r.due_date)}</td>
+                      <td className="num" style={{ textAlign: 'right' }}>{formatCurrency(r.total_amount)}</td>
+                      <td>
+                        <Meter value={r.total_amount ? (Number(r.paid_amount) / Number(r.total_amount)) * 100 : 0} tone={r.status === 'PAID' ? 'good' : 'warn'} />
+                        <div className="mono" style={{ fontSize: 8, color: 'var(--color-text-muted)', marginTop: 3 }}>
+                          {formatCurrency(r.paid_amount)}
+                        </div>
+                      </td>
+                      <td><StatusBadge status={r.status} size="sm" /></td>
+                    </tr>
+                  ))}
+                  {!loading && filtered.length === 0 && (
+                    <tr><td colSpan={8} style={{ padding: 40, textAlign: 'center', color: 'var(--color-text-muted)' }}>No invoices match this filter.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Panel>
+      </motion.div>
 
-                {['ISSUED', 'PARTIALLY_PAID', 'OVERDUE'].includes(currentStatus) && (
-                  <>
-                    <Button
-                      variant="success"
-                      size="sm"
-                      icon={CreditCard}
-                      onClick={openPaymentModal}
-                    >
-                      Record Payment
-                    </Button>
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      icon={XCircle}
-                      loading={actionLoading}
-                      onClick={() => handleStatusChange('CANCELLED')}
-                    >
-                      Cancel
-                    </Button>
-                  </>
-                )}
-
-                {currentStatus === 'PAID' && (
-                  <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-success-text)', fontWeight: 600 }}>
-                    ✓ Invoice is fully settled and paid in full.
+      <Drawer isOpen={Boolean(selected)} onClose={() => setSelected(null)}
+        title={selected?.invoice_number || 'Invoice'}
+        subtitle={selected ? `${selected.customer_name} · ${selected.order_number}` : ''}
+        footer={selected && Number(selected.outstanding_amount) > 0 && selected.status !== 'CANCELLED' ? (
+          <Button variant="primary" icon={CircleDollarSign} onClick={openPay}>Record payment</Button>
+        ) : selected ? <span style={{ fontSize: 10, color: 'var(--color-success-text)' }}><CheckCircle size={11} /> Settled in full</span> : null}>
+        {selected && (
+          <div style={{ display: 'grid', gap: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <Fact label="Status" value={<StatusBadge status={selected.status} size="sm" />} />
+              <Fact label="Total" value={formatCurrency(selected.total_amount)} />
+              <Fact label="Paid" value={formatCurrency(selected.paid_amount)} />
+              <Fact label="Outstanding" value={formatCurrency(selected.outstanding_amount)} />
+              <Fact label="Issued" value={formatDate(selected.invoice_date)} />
+              <Fact label="Due" value={formatDate(selected.due_date)} />
+            </div>
+            <div>
+              <div className="eyebrow" style={{ marginBottom: 7 }}>Payment history</div>
+              {(selected.payments || []).map((p) => (
+                <div key={p.payment_id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '8px 0', borderBottom: '1px solid var(--color-border-subtle)' }}>
+                  <div>
+                    <div className="mono" style={{ fontSize: 10 }}>{p.payment_reference}</div>
+                    <div className="mono" style={{ fontSize: 8.5, color: 'var(--color-text-muted)' }}>{formatDate(p.payment_date)} · {p.payment_method}</div>
                   </div>
-                )}
-              </div>
+                  <span className="mono" style={{ fontSize: 10, color: 'var(--color-success-text)' }}>{formatCurrency(p.amount)}</span>
+                </div>
+              ))}
+              {!selected.payments?.length && <div style={{ fontSize: 10.5, color: 'var(--color-text-muted)' }}>No payments recorded against this invoice.</div>}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9.5, color: 'var(--color-text-muted)' }}>
+              <span>Subtotal · tax · discount</span>
+              <span className="mono">{formatCurrency(selected.subtotal)} · {formatCurrency(selected.tax_amount)} · {formatCurrency(selected.discount_amount)}</span>
             </div>
           </div>
         )}
       </Drawer>
 
-      {/* Create Invoice Modal */}
-      <Modal
-        isOpen={isCreateOpen}
-        onClose={() => !createSubmitting && setIsCreateOpen(false)}
-        title="Generate Customer Invoice"
-        subtitle="Create commercial billing invoice against sales fulfillment."
-        size="md"
-        footer={
-          <>
-            <Button
-              variant="ghost"
-              disabled={createSubmitting}
-              onClick={() => setIsCreateOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              loading={createSubmitting}
-              onClick={handleCreateSubmit}
-            >
-              Generate Invoice
-            </Button>
-          </>
-        }
-      >
-        <form onSubmit={handleCreateSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-          <Select
-            label="Billed Customer"
-            required
-            value={newInvoice.customer_id}
-            onChange={(e) => setNewInvoice({ ...newInvoice, customer_id: e.target.value })}
-            options={customers.map((c) => ({
-              value: c.customer_id || c.id,
-              label: `${c.name} (${c.customer_code || 'Account'})`
-            }))}
-          />
-
-          <Select
-            label="Sales Order (Optional Link)"
-            value={newInvoice.sales_order_id}
-            onChange={(e) => setNewInvoice({ ...newInvoice, sales_order_id: e.target.value })}
-            options={[
-              { value: '', label: 'None (Direct Billing)' },
-              ...orders.map((o) => ({
-                value: o.sales_order_id || o.id,
-                label: `${o.order_number || `ORD-${o.sales_order_id || o.id}`}`
-              }))
-            ]}
-          />
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
-            <Input
-              label="Subtotal ($)"
-              type="number"
-              step="0.01"
-              required
-              value={newInvoice.subtotal}
-              onChange={(e) => setNewInvoice({ ...newInvoice, subtotal: e.target.value })}
-            />
-
-            <Input
-              label="Tax Amount ($)"
-              type="number"
-              step="0.01"
-              value={newInvoice.tax_amount}
-              onChange={(e) => setNewInvoice({ ...newInvoice, tax_amount: e.target.value })}
-            />
-          </div>
-
-          <Input
-            label="Payment Due Date"
-            type="date"
-            required
-            value={newInvoice.due_date}
-            onChange={(e) => setNewInvoice({ ...newInvoice, due_date: e.target.value })}
-          />
-        </form>
+      <Modal isOpen={createOpen} onClose={() => !submitting && setCreateOpen(false)}
+        title="Issue invoice" subtitle="Generate a receivable from a sales order." size="md"
+        footer={<><Button variant="ghost" disabled={submitting} onClick={() => setCreateOpen(false)}>Cancel</Button><Button variant="primary" loading={submitting} onClick={submitInvoice}>Issue invoice</Button></>}>
+        <div className="form-grid">
+          <Select label="Sales order" value={form.sales_order_id} onChange={(e) => setForm({ ...form, sales_order_id: e.target.value })}
+            options={orders.map((o) => ({ value: o.sales_order_id, label: `${o.order_number} · ${o.customer_name} · ${formatCurrency(o.total_amount)}` }))} />
+          <Input label="Due date" type="date" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} />
+          <Input label="Discount amount" type="number" min="0" value={form.discount_amount} onChange={(e) => setForm({ ...form, discount_amount: e.target.value })} />
+          <div className="form-hint">Invoice totals are derived from the selected sales order's committed subtotal and tax.</div>
+        </div>
       </Modal>
 
-      {/* Record Payment Modal */}
-      <Modal
-        isOpen={isPayModalOpen}
-        onClose={() => !paySubmitting && setIsPayModalOpen(false)}
-        title="Record Invoice Settlement"
-        subtitle={`Invoice: ${selectedInvoice?.invoice_number || ''}`}
-        size="md"
-        footer={
-          <>
-            <Button
-              variant="ghost"
-              disabled={paySubmitting}
-              onClick={() => setIsPayModalOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              loading={paySubmitting}
-              onClick={handlePaymentSubmit}
-            >
-              Record Payment
-            </Button>
-          </>
-        }
-      >
-        <form onSubmit={handlePaymentSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-          <Input
-            label="Payment Amount ($)"
-            type="number"
-            step="0.01"
-            min="0.01"
-            required
-            value={payForm.amount}
-            onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })}
-          />
-
-          <Select
-            label="Payment Method"
-            required
-            value={payForm.payment_method}
-            onChange={(e) => setPayForm({ ...payForm, payment_method: e.target.value })}
-            options={[
-              { value: 'ACH', label: 'ACH / Wire Transfer' },
-              { value: 'CREDIT_CARD', label: 'Credit Card' },
-              { value: 'CHECK', label: 'Commercial Check' },
-              { value: 'LETTER_OF_CREDIT', label: 'Letter of Credit' }
-            ]}
-          />
-
-          <Input
-            label="Payment Reference"
-            required
-            value={payForm.payment_reference}
-            onChange={(e) => setPayForm({ ...payForm, payment_reference: e.target.value })}
-          />
-
-          <Input
-            label="Notes"
-            value={payForm.notes}
-            onChange={(e) => setPayForm({ ...payForm, notes: e.target.value })}
-          />
-        </form>
+      <Modal isOpen={payOpen} onClose={() => !submitting && setPayOpen(false)}
+        title="Record payment" subtitle={selected ? `${selected.invoice_number} · outstanding ${formatCurrency(selected.outstanding_amount)}` : ''} size="sm"
+        footer={<><Button variant="ghost" disabled={submitting} onClick={() => setPayOpen(false)}>Cancel</Button><Button variant="primary" loading={submitting} onClick={submitPayment}>Record payment</Button></>}>
+        <div className="form-grid">
+          <Input label="Amount" type="number" min="0" step="0.01" value={pay.amount} onChange={(e) => setPay({ ...pay, amount: e.target.value })} />
+          <Select label="Method" value={pay.payment_method} onChange={(e) => setPay({ ...pay, payment_method: e.target.value })}
+            options={['BANK_TRANSFER', 'UPI', 'CARD', 'CASH', 'CHEQUE'].map((m) => ({ value: m, label: m.replace('_', ' ') }))} />
+          <Input label="Transaction reference" value={pay.transaction_reference} onChange={(e) => setPay({ ...pay, transaction_reference: e.target.value })} placeholder="Optional bank reference" />
+          <Input label="Notes" value={pay.notes} onChange={(e) => setPay({ ...pay, notes: e.target.value })} />
+        </div>
       </Modal>
+    </motion.div>
+  );
+}
+
+function Fact({ label, value }) {
+  return (
+    <div style={{ border: '1px solid var(--color-border-subtle)', borderRadius: 4, padding: '7px 9px' }}>
+      <div className="eyebrow" style={{ fontSize: 8, marginBottom: 3 }}>{label}</div>
+      <div style={{ fontSize: 10.5 }}>{value}</div>
     </div>
   );
 }

@@ -1,616 +1,298 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { RotateCcw, RefreshCw, Plus, CheckCircle, PackageCheck, XCircle } from 'lucide-react';
-import { useApiQuery } from '../hooks/useApiQuery';
-import { usePagination } from '../hooks/usePagination';
+import React, { useEffect, useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
+import { RefreshCw, Search, X, Plus, CheckCircle, PackageCheck, XCircle, RotateCcw, AlertTriangle } from 'lucide-react';
 import * as returnService from '../services/returnService';
 import * as orderService from '../services/orderService';
-import * as productService from '../services/productService';
-import { normalizeList, normalizePagination } from '../utils/responseNormalizer';
+import { normalizeList } from '../utils/responseNormalizer';
 import { useToast } from '../context/ToastContext';
 import { PageHeader } from '../components/common/PageHeader';
-import { FilterBar } from '../components/common/FilterBar';
-import { Table } from '../components/common/Table';
-import { Pagination } from '../components/common/Pagination';
-import { Select } from '../components/common/Select';
-import { Input } from '../components/common/Input';
-import { Button } from '../components/common/Button';
+import { Panel, PanelBody, Stat, StatGrid } from '../components/common/Panel';
+import { StatusBadge } from '../components/common/StatusBadge';
 import { Drawer } from '../components/common/Drawer';
 import { Modal } from '../components/common/Modal';
-import { StatusBadge } from '../components/common/StatusBadge';
+import { Button } from '../components/common/Button';
+import { Input } from '../components/common/Input';
+import { Select } from '../components/common/Select';
 import { formatDate, formatNumber } from '../utils/formatters';
+import { pageStagger, riseIn } from '../utils/motion';
+
+const REASONS = ['DAMAGED', 'DEFECTIVE', 'WRONG_PRODUCT', 'NOT_AS_DESCRIBED', 'CHANGED_MIND', 'OTHER'];
 
 export function ReturnsPage() {
   const toast = useToast();
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [selectedReturn, setSelectedReturn] = useState(null);
-  const [actionLoading, setActionLoading] = useState(false);
-
-  // Create RMA Modal
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [createSubmitting, setCreateSubmitting] = useState(false);
+  const [status, setStatus] = useState('');
+  const [selected, setSelected] = useState(null);
+  const [busy, setBusy] = useState(false);
   const [orders, setOrders] = useState([]);
-  const [products, setProducts] = useState([]);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [orderDetail, setOrderDetail] = useState(null);
+  const [form, setForm] = useState({ sales_order_id: '', reason: 'DEFECTIVE', notes: '', items: [] });
+  const [submitting, setSubmitting] = useState(false);
 
-  const [newReturn, setNewReturn] = useState({
-    sales_order_id: '',
-    reason: 'Customer Return - Defective Unit',
-    return_type: 'CUSTOMER_RETURN',
-    items: [{ product_id: '', requested_quantity: 1, condition: 'PENDING_INSPECTION' }]
-  });
+  const load = () => {
+    setLoading(true); setError(null);
+    returnService.getReturns({ limit: 200 })
+      .then((res) => { setRows(normalizeList(res)); setLoading(false); })
+      .catch((e) => { setError(e?.message || 'Returns service unavailable.'); setLoading(false); });
+  };
+  useEffect(load, []);
 
-  const { page, limit, setPage, setLimit } = usePagination(1, 20);
+  const filtered = useMemo(() => rows.filter((r) => {
+    const q = search.trim().toLowerCase();
+    const match = !q || [r.return_number, r.order_number, r.customer_name, r.warehouse_name].some((v) => String(v || '').toLowerCase().includes(q));
+    return match && (!status || r.status === status);
+  }), [rows, search, status]);
 
-  const { data: rawData, loading, error, refetch } = useApiQuery(
-    returnService.getReturns,
-    { page, limit, search, status: statusFilter },
-    { immediate: true }
-  );
+  const stats = useMemo(() => filtered.reduce((a, r) => {
+    a.units += (r.items || []).reduce((s, i) => s + Number(i.requested_quantity || 0), 0);
+    if (['REQUESTED', 'APPROVED', 'INSPECTING'].includes(r.status)) a.open += 1;
+    if (r.status === 'COMPLETED') a.done += 1;
+    return a;
+  }, { units: 0, open: 0, done: 0 }), [filtered]);
 
-  const returns = useMemo(() => normalizeList(rawData), [rawData]);
-  const pagination = useMemo(() => normalizePagination(rawData, returns, page, limit), [rawData, returns, page, limit]);
-
-  // Compute live summary stats
-  const summaryStats = useMemo(() => {
-    let pendingApproval = 0;
-    let inspectingRestocked = 0;
-    let completedRefunded = 0;
-
-    returns.forEach((r) => {
-      const st = (r.status || '').toUpperCase();
-      if (st === 'REQUESTED' || st === 'PENDING') pendingApproval += 1;
-      if (st === 'APPROVED' || st === 'RECEIVED' || st === 'INSPECTING') inspectingRestocked += 1;
-      if (st === 'REFUNDED' || st === 'COMPLETED') completedRefunded += 1;
-    });
-
-    return {
-      total: pagination.total || returns.length,
-      pending: pendingApproval,
-      inProcess: inspectingRestocked,
-      completed: completedRefunded
-    };
-  }, [returns, pagination.total]);
-
-  useEffect(() => {
-    if (isCreateOpen) {
-      Promise.all([
-        orderService.getOrders({ limit: 50 }).catch(() => ({ data: [] })),
-        productService.getProducts({ limit: 50 }).catch(() => ({ data: [] }))
-      ]).then(([ordRes, prodRes]) => {
-        const ords = normalizeList(ordRes);
-        const prods = normalizeList(prodRes);
-        setOrders(ords);
-        setProducts(prods);
-
-        setNewReturn((prev) => ({
-          ...prev,
-          sales_order_id: prev.sales_order_id || (ords[0]?.sales_order_id || ords[0]?.id || 1),
-          items: prev.items.map((item) => ({
-            ...item,
-            product_id: item.product_id || (prods[0]?.product_id || prods[0]?.id || 1)
-          }))
-        }));
-      });
-    }
-  }, [isCreateOpen]);
-
-  // Status Action Handler
-  const handleAction = async (actionType) => {
-    if (!selectedReturn) return;
-    const returnId = selectedReturn.return_id || selectedReturn.id;
-    setActionLoading(true);
-
+  const act = async (fn, label, payload) => {
+    if (!selected) return;
+    setBusy(true);
     try {
-      let res;
-      if (actionType === 'APPROVE') {
-        res = await returnService.approveReturn(returnId);
-        toast.success(`RMA #${selectedReturn.return_number || returnId} approved for intake`);
-      } else if (actionType === 'RECEIVE') {
-        res = await returnService.receiveReturn(returnId);
-        toast.success(`RMA #${selectedReturn.return_number || returnId} received and inventory updated`);
-      } else if (actionType === 'REJECT') {
-        res = await returnService.rejectReturn(returnId);
-        toast.success(`RMA #${selectedReturn.return_number || returnId} rejected`);
-      }
-      setSelectedReturn(res?.data || null);
-      refetch();
-    } catch (err) {
-      toast.error(err.response?.data?.message || err.message || 'Action failed');
-    } finally {
-      setActionLoading(false);
+      await fn(selected.return_id, payload);
+      toast.success(`${selected.return_number} → ${label}`);
+      setSelected(null); load();
+    } catch (e) { toast.error(e?.message || 'Return action failed.'); }
+    finally { setBusy(false); }
+  };
+
+  const openCreate = async () => {
+    setCreateOpen(true);
+    if (!orders.length) {
+      try {
+        const res = await orderService.getOrders({ limit: 100 });
+        const list = normalizeList(res);
+        setOrders(list);
+        if (list[0]) pickOrder(list[0].sales_order_id);
+      } catch (e) { toast.error(e?.message || 'Could not load sales orders.'); }
     }
   };
 
-  const handleCreateSubmit = async (e) => {
-    e.preventDefault();
-    if (!newReturn.sales_order_id) {
-      toast.error('Please select a sales order');
-      return;
-    }
-
-    setCreateSubmitting(true);
+  const pickOrder = async (id) => {
     try {
-      const payload = {
-        sales_order_id: Number(newReturn.sales_order_id),
-        reason: newReturn.reason || 'Customer Return',
-        return_type: newReturn.return_type || 'CUSTOMER_RETURN',
-        items: newReturn.items.map((item) => ({
-          product_id: Number(item.product_id),
-          requested_quantity: Number(item.requested_quantity) || 1,
-          condition: item.condition || 'PENDING_INSPECTION'
-        }))
-      };
-
-      const res = await returnService.createReturn(payload);
-      toast.success(`RMA #${res?.data?.return_number || ''} created successfully`);
-      setIsCreateOpen(false);
-      refetch();
-    } catch (err) {
-      toast.error(err.response?.data?.message || err.message || 'Failed to create return RMA');
-    } finally {
-      setCreateSubmitting(false);
-    }
-  };
-
-  const addItemRow = () => {
-    const defaultProd = products[0];
-    setNewReturn((prev) => ({
-      ...prev,
-      items: [
-        ...prev.items,
-        {
-          product_id: defaultProd?.product_id || defaultProd?.id || 1,
+      const res = await orderService.getOrderById(id);
+      const detail = res?.data || res;
+      setOrderDetail(detail);
+      setForm((f) => ({
+        ...f,
+        sales_order_id: id,
+        items: (detail.items || []).map((i) => ({
+          product_id: i.product_id,
+          product_name: i.product_name,
+          sku: i.sku,
           requested_quantity: 1,
           condition: 'PENDING_INSPECTION'
-        }
-      ]
-    }));
+        }))
+      }));
+    } catch (e) { toast.error(e?.message || 'Could not load order lines.'); }
   };
 
-  const removeItemRow = (idx) => {
-    setNewReturn((prev) => ({
-      ...prev,
-      items: prev.items.filter((_, i) => i !== idx)
-    }));
+  const submit = async () => {
+    if (!orderDetail || !form.items.length) { toast.error('Select an order and at least one item.'); return; }
+    setSubmitting(true);
+    try {
+      await returnService.createReturn({
+        sales_order_id: Number(orderDetail.sales_order_id),
+        customer_id: Number(orderDetail.customer_id),
+        warehouse_id: Number(orderDetail.warehouse_id),
+        reason: form.reason,
+        notes: form.notes,
+        items: form.items.filter((i) => Number(i.requested_quantity) > 0).map((i) => ({
+          product_id: Number(i.product_id),
+          requested_quantity: Number(i.requested_quantity),
+          condition: i.condition
+        }))
+      });
+      toast.success('Return request created.');
+      setCreateOpen(false); load();
+    } catch (e) { toast.error(e?.message || 'Return request failed.'); }
+    finally { setSubmitting(false); }
   };
-
-  const updateItemRow = (idx, field, value) => {
-    setNewReturn((prev) => {
-      const items = [...prev.items];
-      items[idx] = { ...items[idx], [field]: value };
-      return { ...prev, items };
-    });
-  };
-
-  const columns = [
-    {
-      key: 'return_number',
-      header: 'RMA Reference',
-      render: (r) => (
-        <div>
-          <div style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
-            {r.return_number || `RMA-${r.return_id || r.id}`}
-          </div>
-          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '0.15rem' }}>
-            Authorized: <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-secondary)' }}>{formatDate(r.created_at || r.return_date)}</span>
-          </div>
-        </div>
-      )
-    },
-    {
-      key: 'order_number',
-      header: 'Original Order Ref',
-      render: (r) => (
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
-          {r.sales_orders?.order_number || r.order_number || `Order #${r.sales_order_id}`}
-        </span>
-      )
-    },
-    {
-      key: 'reason',
-      header: 'Discrepancy / RMA Reason',
-      render: (r) => (
-        <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
-          {r.reason || 'Customer Return / Damaged'}
-        </span>
-      )
-    },
-    {
-      key: 'status',
-      header: 'Disposition State',
-      render: (r) => <StatusBadge status={r.status || 'REQUESTED'} size="sm" />
-    }
-  ];
-
-  const currentStatus = (selectedReturn?.status || '').toUpperCase();
 
   return (
-    <div className="returns-page animate-fade-in">
-      <PageHeader
-        eyebrow="QUALITY // REVERSE LOGISTICS"
-        title="Returns & RMA Dispositions"
-        description="Customer return authorizations, warehouse QA inspection, salvage disposition, and credit reconciliations."
-        actions={
-          <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-            <Button
-              variant="outline"
-              size="sm"
-              icon={RefreshCw}
-              onClick={refetch}
-            >
-              Refresh RMAs
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              icon={Plus}
-              onClick={() => setIsCreateOpen(true)}
-            >
-              Create RMA
-            </Button>
-          </div>
-        }
-      />
-
-      {/* KPI Summary Strip */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: 'var(--space-3)',
-          marginBottom: 'var(--space-5)'
-        }}
-      >
-        <div
-          style={{
-            padding: '0.85rem 1.15rem',
-            backgroundColor: 'var(--color-bg-card)',
-            border: '1px solid var(--color-border-default)',
-            borderRadius: 'var(--radius-lg)'
-          }}
-        >
-          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Total RMAs Filed
-          </span>
-          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
-            {formatNumber(summaryStats.total)}
-          </div>
-        </div>
-
-        <div
-          style={{
-            padding: '0.85rem 1.15rem',
-            backgroundColor: 'var(--color-bg-card)',
-            border: '1px solid var(--color-border-default)',
-            borderRadius: 'var(--radius-lg)'
-          }}
-        >
-          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Pending Authorization
-          </span>
-          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-warning-text)', fontFamily: 'var(--font-mono)' }}>
-            {formatNumber(summaryStats.pending)}
-          </div>
-        </div>
-
-        <div
-          style={{
-            padding: '0.85rem 1.15rem',
-            backgroundColor: 'var(--color-bg-card)',
-            border: '1px solid var(--color-border-default)',
-            borderRadius: 'var(--radius-lg)'
-          }}
-        >
-          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Dock QA / In Inspection
-          </span>
-          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-info-text)', fontFamily: 'var(--font-mono)' }}>
-            {formatNumber(summaryStats.inProcess)}
-          </div>
-        </div>
-
-        <div
-          style={{
-            padding: '0.85rem 1.15rem',
-            backgroundColor: 'var(--color-bg-card)',
-            border: '1px solid var(--color-border-default)',
-            borderRadius: 'var(--radius-lg)'
-          }}
-        >
-          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Resolved & Restocked
-          </span>
-          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-success-text)', fontFamily: 'var(--font-mono)' }}>
-            {formatNumber(summaryStats.completed)}
-          </div>
-        </div>
-      </div>
-
-      <FilterBar
-        search={search}
-        onSearchChange={(val) => {
-          setSearch(val);
-          setPage(1);
-        }}
-        searchPlaceholder="Filter by RMA number, reason, order ref..."
-        hasActiveFilters={Boolean(search || statusFilter)}
-        onReset={() => {
-          setSearch('');
-          setStatusFilter('');
-          setPage(1);
-        }}
-      >
-        <Select
-          value={statusFilter}
-          onChange={(e) => {
-            setStatusFilter(e.target.value);
-            setPage(1);
-          }}
-          options={[
-            { value: '', label: 'All Statuses' },
-            { value: 'REQUESTED', label: 'Requested' },
-            { value: 'APPROVED', label: 'Approved' },
-            { value: 'RECEIVED', label: 'Received' },
-            { value: 'INSPECTING', label: 'Inspecting' },
-            { value: 'REFUNDED', label: 'Refunded' },
-            { value: 'COMPLETED', label: 'Completed' },
-            { value: 'REJECTED', label: 'Rejected' }
-          ]}
+    <motion.div className="page" variants={pageStagger} initial="hidden" animate="visible">
+      <motion.div variants={riseIn}>
+        <PageHeader
+          eyebrow="QUALITY / REVERSE LOGISTICS"
+          title="Returns & RMA"
+          description="Customer returns from request through inspection, restock or rejection."
+          actions={
+            <>
+              <button className="btn btn-outline" onClick={load}><RefreshCw size={11} className={loading ? 'animate-spin' : ''} /> Refresh</button>
+              <button className="btn btn-primary" onClick={openCreate}><Plus size={11} /> New RMA</button>
+            </>
+          }
         />
-      </FilterBar>
+      </motion.div>
 
-      <Table
-        columns={columns}
-        data={returns}
-        loading={loading}
-        onRowClick={(ret) => setSelectedReturn(ret)}
-        emptyTitle="No Return Records Found"
-        emptyMessage="No reverse logistics RMA records matched your filter criteria."
-      />
+      <motion.div variants={riseIn}>
+        <StatGrid cols={4}>
+          <Stat label="Return requests" value={formatNumber(filtered.length)} meta={`${formatNumber(rows.length)} total RMAs`} icon={RotateCcw} />
+          <Stat label="Open cases" value={formatNumber(stats.open)} meta="Awaiting disposition" tone="accent" />
+          <Stat label="Units returned" value={formatNumber(stats.units)} meta="Requested quantity" />
+          <Stat label="Completed" value={formatNumber(stats.done)} meta="Inspected and closed" tone="good" />
+        </StatGrid>
+      </motion.div>
 
-      <Pagination
-        currentPage={page}
-        totalPages={pagination.totalPages || 1}
-        totalItems={pagination.total || returns.length}
-        limit={limit}
-        onPageChange={setPage}
-        onLimitChange={setLimit}
-      />
-
-      {/* Return Details Drawer */}
-      <Drawer
-        isOpen={Boolean(selectedReturn)}
-        onClose={() => setSelectedReturn(null)}
-        title={selectedReturn?.return_number || `RMA #${selectedReturn?.return_id || selectedReturn?.id}`}
-        subtitle={`Sales Order: ${selectedReturn?.sales_orders?.order_number || selectedReturn?.order_number || `Order #${selectedReturn?.sales_order_id}`}`}
-      >
-        {selectedReturn && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-            <div style={{ padding: '0.85rem 1rem', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
-                <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>RMA State</span>
-                <StatusBadge status={selectedReturn.status || 'REQUESTED'} size="sm" />
-              </div>
-              <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)', display: 'flex', justifyContent: 'space-between' }}>
-                <span>Return Type:</span>
-                <strong style={{ color: 'var(--color-text-primary)' }}>{selectedReturn.return_type || 'CUSTOMER_RETURN'}</strong>
-              </div>
-              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)', marginTop: '0.4rem', borderTop: '1px solid var(--color-border-subtle)', paddingTop: '0.4rem' }}>
-                <strong style={{ color: 'var(--color-text-muted)' }}>Reason:</strong> {selectedReturn.reason || 'Customer Return'}
-              </div>
+      <motion.div variants={riseIn}>
+        <Panel>
+          <div className="toolbar">
+            <div className="toolbar-group">
+              <label className="search-field">
+                <Search size={12} />
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="RMA, order, customer or hub…" />
+                {search && <button onClick={() => setSearch('')}><X size={11} /></button>}
+              </label>
+              <select value={status} onChange={(e) => setStatus(e.target.value)} style={{ height: 30, fontSize: 11 }}>
+                <option value="">All statuses</option>
+                {['REQUESTED', 'APPROVED', 'INSPECTING', 'RECEIVED', 'COMPLETED', 'REJECTED'].map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
             </div>
+            <span className="mono" style={{ fontSize: 9.5, color: 'var(--color-text-muted)' }}>{filtered.length} CASES</span>
+          </div>
 
-            {/* Operational Actions */}
-            <div style={{ padding: '0.85rem 1rem', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
-              <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--color-text-muted)', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                RMA Workflow Actions
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                {['REQUESTED', 'PENDING'].includes(currentStatus) && (
-                  <>
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      icon={CheckCircle}
-                      loading={actionLoading}
-                      onClick={() => handleAction('APPROVE')}
-                    >
-                      Approve RMA
-                    </Button>
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      icon={XCircle}
-                      loading={actionLoading}
-                      onClick={() => handleAction('REJECT')}
-                    >
-                      Reject RMA
-                    </Button>
-                  </>
-                )}
-
-                {currentStatus === 'APPROVED' && (
-                  <Button
-                    variant="success"
-                    size="sm"
-                    icon={PackageCheck}
-                    loading={actionLoading}
-                    onClick={() => handleAction('RECEIVE')}
-                  >
-                    Receive Return & Restock
-                  </Button>
-                )}
-
-                {['RECEIVED', 'REFUNDED', 'COMPLETED', 'REJECTED'].includes(currentStatus) && (
-                  <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
-                    RMA is in terminal state ({currentStatus}).
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Items */}
-            {(selectedReturn.items || selectedReturn.return_items) && (selectedReturn.items || selectedReturn.return_items).length > 0 && (
-              <div>
-                <h4 style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>
-                  Returned Line Items
-                </h4>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                  {(selectedReturn.items || selectedReturn.return_items).map((item, idx) => (
-                    <div
-                      key={idx}
-                      style={{
-                        padding: '0.65rem 0.85rem',
-                        backgroundColor: 'var(--color-bg-secondary)',
-                        borderRadius: 'var(--radius-md)',
-                        border: '1px solid var(--color-border-subtle)',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center'
-                      }}
-                    >
-                      <div>
-                        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-primary)', fontWeight: 600 }}>
-                          {item.products?.name || item.product_name || `Product #${item.product_id}`}
-                        </div>
-                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                          Condition: <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-secondary)' }}>{item.condition || 'PENDING_INSPECTION'}</span>
-                        </div>
-                      </div>
-                      <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--color-danger-text)' }}>
-                        -{item.requested_quantity || item.quantity} units
-                      </span>
-                    </div>
+          {error ? (
+            <div style={{ padding: 30, textAlign: 'center', color: 'var(--color-danger-text)', fontSize: 11 }}>{error}</div>
+          ) : (
+            <div className="table-scroll tall">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>RMA</th>
+                    <th>Order</th>
+                    <th>Customer</th>
+                    <th>Reason</th>
+                    <th>Requested</th>
+                    <th style={{ textAlign: 'right' }}>Units</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading && Array.from({ length: 8 }).map((_, i) => (
+                    <tr key={i}>{Array.from({ length: 7 }).map((__, j) => <td key={j}><div className="skeleton" style={{ height: 9 }} /></td>)}</tr>
                   ))}
+                  {!loading && filtered.map((r) => (
+                    <tr key={r.return_id} className="clickable" onClick={() => setSelected(r)}>
+                      <td className="mono" style={{ fontSize: 10 }}>{r.return_number}</td>
+                      <td className="mono" style={{ color: 'var(--color-text-secondary)' }}>{r.order_number}</td>
+                      <td className="cell-strong">{r.customer_name}</td>
+                      <td><span style={{ fontSize: 10, color: 'var(--color-text-secondary)' }}>{r.reason?.replace('_', ' ')}</span></td>
+                      <td className="mono" style={{ color: 'var(--color-text-muted)' }}>{formatDate(r.requested_at)}</td>
+                      <td className="mono" style={{ textAlign: 'right' }}>{formatNumber((r.items || []).reduce((s, i) => s + Number(i.requested_quantity || 0), 0))}</td>
+                      <td><StatusBadge status={r.status} size="sm" /></td>
+                    </tr>
+                  ))}
+                  {!loading && filtered.length === 0 && (
+                    <tr><td colSpan={7} style={{ padding: 40, textAlign: 'center', color: 'var(--color-text-muted)' }}>No returns match this filter.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Panel>
+      </motion.div>
+
+      <Drawer isOpen={Boolean(selected)} onClose={() => setSelected(null)}
+        title={selected?.return_number || 'Return'}
+        subtitle={selected ? `${selected.customer_name} · ${selected.order_number}` : ''}
+        footer={selected && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {selected.status === 'REQUESTED' && <Button variant="primary" loading={busy} icon={CheckCircle} onClick={() => act(returnService.approveReturn, 'APPROVED')}>Approve</Button>}
+            {['APPROVED', 'INSPECTING'].includes(selected.status) && <Button variant="success" loading={busy} icon={PackageCheck} onClick={() => act(returnService.receiveReturn, 'COMPLETED', { restock: true })}>Receive & restock</Button>}
+            {['REQUESTED', 'APPROVED', 'INSPECTING'].includes(selected.status) && <Button variant="danger" loading={busy} icon={XCircle} onClick={() => act(returnService.rejectReturn, 'REJECTED')}>Reject</Button>}
+          </div>
+        )}>
+        {selected && (
+          <div style={{ display: 'grid', gap: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <Fact label="Status" value={<StatusBadge status={selected.status} size="sm" />} />
+              <Fact label="Reason" value={selected.reason?.replace('_', ' ')} />
+              <Fact label="Requested" value={formatDate(selected.requested_at)} />
+              <Fact label="Processed" value={formatDate(selected.processed_at)} />
+              <Fact label="Hub" value={selected.warehouse_name} />
+              <Fact label="Warehouse code" value={selected.warehouse_code} />
+            </div>
+            <div>
+              <div className="eyebrow" style={{ marginBottom: 7 }}>Return lines</div>
+              {(selected.items || []).map((i) => (
+                <div key={i.return_item_id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '8px 0', borderBottom: '1px solid var(--color-border-subtle)' }}>
+                  <div>
+                    <div style={{ fontSize: 11 }}>{i.product_name}</div>
+                    <div className="mono" style={{ fontSize: 9, color: 'var(--color-text-muted)' }}>{i.sku} · {i.condition}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div className="mono" style={{ fontSize: 10 }}>{i.requested_quantity} requested</div>
+                    <div className="mono" style={{ fontSize: 8.5, color: 'var(--color-text-muted)' }}>{i.approved_quantity} approved · {i.received_quantity} received</div>
+                  </div>
                 </div>
-              </div>
-            )}
+              ))}
+            </div>
+            {selected.notes && <div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>{selected.notes}</div>}
           </div>
         )}
       </Drawer>
 
-      {/* Create RMA Modal */}
-      <Modal
-        isOpen={isCreateOpen}
-        onClose={() => !createSubmitting && setIsCreateOpen(false)}
-        title="Create Return Authorization (RMA)"
-        subtitle="Authorize an inbound customer return with inspection workflow."
-        size="lg"
-        footer={
-          <>
-            <Button
-              variant="ghost"
-              disabled={createSubmitting}
-              onClick={() => setIsCreateOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              loading={createSubmitting}
-              onClick={handleCreateSubmit}
-            >
-              Issue RMA
-            </Button>
-          </>
-        }
-      >
-        <form onSubmit={handleCreateSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-          <Select
-            label="Original Sales Order"
-            required
-            value={newReturn.sales_order_id}
-            onChange={(e) => setNewReturn({ ...newReturn, sales_order_id: e.target.value })}
-            options={orders.map((o) => ({
-              value: o.sales_order_id || o.id,
-              label: `${o.order_number || `ORD-${o.sales_order_id || o.id}`} (${o.customers?.name || 'Customer'})`
-            }))}
-          />
-
-          <Input
-            label="Return Reason"
-            required
-            value={newReturn.reason}
-            onChange={(e) => setNewReturn({ ...newReturn, reason: e.target.value })}
-            placeholder="e.g. Defective component / Damaged packaging"
-          />
-
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-2)' }}>
-              <label style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text-secondary)' }}>
-                RMA Items
-              </label>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                icon={Plus}
-                onClick={addItemRow}
-              >
-                Add Item
-              </Button>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-              {newReturn.items.map((item, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '3fr 1.5fr 2fr auto',
-                    gap: 'var(--space-2)',
-                    alignItems: 'center',
-                    padding: '0.6rem',
-                    backgroundColor: 'var(--color-bg-secondary)',
-                    borderRadius: 'var(--radius-md)',
-                    border: '1px solid var(--color-border-subtle)'
-                  }}
-                >
-                  <Select
-                    value={item.product_id}
-                    onChange={(e) => updateItemRow(idx, 'product_id', e.target.value)}
-                    options={products.map((p) => ({
-                      value: p.product_id || p.id,
-                      label: `${p.name} (${p.sku || 'SKU'})`
-                    }))}
-                  />
-
-                  <Input
-                    type="number"
-                    min="1"
-                    value={item.requested_quantity}
-                    onChange={(e) => updateItemRow(idx, 'requested_quantity', Number(e.target.value))}
-                    placeholder="Qty"
-                  />
-
-                  <Select
-                    value={item.condition}
-                    onChange={(e) => updateItemRow(idx, 'condition', e.target.value)}
-                    options={[
-                      { value: 'PENDING_INSPECTION', label: 'Pending Inspection' },
-                      { value: 'RESTOCKABLE', label: 'Restockable / Good' },
-                      { value: 'DAMAGED', label: 'Damaged' },
-                      { value: 'SCRAP', label: 'Scrap / Unusable' }
-                    ]}
-                  />
-
-                  {newReturn.items.length > 1 && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      style={{ color: 'var(--color-danger-text)' }}
-                      onClick={() => removeItemRow(idx)}
-                    >
-                      ✕
-                    </Button>
-                  )}
-                </div>
-              ))}
-            </div>
+      <Modal isOpen={createOpen} onClose={() => !submitting && setCreateOpen(false)}
+        title="Create return request" subtitle="Raise an RMA against a delivered sales order." size="lg"
+        footer={<><Button variant="ghost" disabled={submitting} onClick={() => setCreateOpen(false)}>Cancel</Button><Button variant="primary" loading={submitting} onClick={submit}>Create RMA</Button></>}>
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div className="form-grid cols-2">
+            <Select label="Sales order" value={form.sales_order_id} onChange={(e) => pickOrder(e.target.value)}
+              options={orders.map((o) => ({ value: o.sales_order_id, label: `${o.order_number} · ${o.customer_name}` }))} />
+            <Select label="Reason" value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })}
+              options={REASONS.map((r) => ({ value: r, label: r.replace(/_/g, ' ') }))} />
           </div>
-        </form>
+          <Input label="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Inspection context" />
+          {orderDetail && (
+            <div>
+              <div className="eyebrow" style={{ marginBottom: 6 }}>Return lines · {orderDetail.order_number}</div>
+              <table className="data-table">
+                <thead><tr><th>Item</th><th>Condition</th><th>Qty</th></tr></thead>
+                <tbody>
+                  {form.items.map((it, idx) => (
+                    <tr key={it.product_id}>
+                      <td>
+                        <div style={{ fontSize: 10.5 }}>{it.product_name}</div>
+                        <div className="mono" style={{ fontSize: 8.5, color: 'var(--color-text-muted)' }}>{it.sku}</div>
+                      </td>
+                      <td>
+                        <select value={it.condition} style={{ height: 26, fontSize: 10 }} onChange={(e) => {
+                          const items = [...form.items]; items[idx] = { ...items[idx], condition: e.target.value }; setForm({ ...form, items });
+                        }}>
+                          {['PENDING_INSPECTION', 'GOOD', 'DAMAGED', 'DEFECTIVE'].map((c) => <option key={c} value={c}>{c.replace('_', ' ')}</option>)}
+                        </select>
+                      </td>
+                      <td>
+                        <input type="number" min="0" value={it.requested_quantity} style={{ width: 64 }} onChange={(e) => {
+                          const items = [...form.items]; items[idx] = { ...items[idx], requested_quantity: e.target.value }; setForm({ ...form, items });
+                        }} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </Modal>
+    </motion.div>
+  );
+}
+
+function Fact({ label, value }) {
+  return (
+    <div style={{ border: '1px solid var(--color-border-subtle)', borderRadius: 4, padding: '7px 9px' }}>
+      <div className="eyebrow" style={{ fontSize: 8, marginBottom: 3 }}>{label}</div>
+      <div style={{ fontSize: 10.5 }}>{value || '—'}</div>
     </div>
   );
 }

@@ -1,99 +1,31 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Compass, Home, ArrowLeft } from 'lucide-react';
-import { Button } from '../components/common/Button';
+import { motion } from 'framer-motion';
+import { ArrowLeft, Compass } from 'lucide-react';
 
 export function NotFoundPage() {
   const navigate = useNavigate();
-
   return (
-    <div
-      className="animate-fade-in"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: '70vh',
-        textAlign: 'center',
-        padding: 'var(--space-8)'
-      }}
-    >
-      <div
-        style={{
-          padding: '0.35rem 0.85rem',
-          backgroundColor: 'var(--color-bg-card)',
-          border: '1px solid var(--color-border-default)',
-          borderRadius: 'var(--radius-full)',
-          fontSize: '11px',
-          fontWeight: 700,
-          fontFamily: 'var(--font-mono)',
-          letterSpacing: '0.08em',
-          color: 'var(--color-warning-text)',
-          marginBottom: 'var(--space-4)',
-          textTransform: 'uppercase'
-        }}
+    <div className="page" style={{ alignItems: 'center', justifyContent: 'center', minHeight: '60vh' }}>
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+        style={{ textAlign: 'center', maxWidth: 420 }}
       >
-        TELEMETRY ROUTING // 404 EXCEPTION
-      </div>
-
-      <div
-        style={{
-          width: '64px',
-          height: '64px',
-          borderRadius: 'var(--radius-xl)',
-          backgroundColor: 'var(--color-bg-card)',
-          border: '1px solid var(--color-border-default)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: 'var(--color-text-secondary)',
-          marginBottom: 'var(--space-4)'
-        }}
-      >
-        <Compass size={32} />
-      </div>
-
-      <h1
-        style={{
-          fontSize: 'var(--font-size-3xl)',
-          fontWeight: 700,
-          color: 'var(--color-text-primary)',
-          letterSpacing: '-0.03em',
-          marginBottom: 'var(--space-2)'
-        }}
-      >
-        Operational Node Not Found
-      </h1>
-
-      <p
-        style={{
-          fontSize: 'var(--font-size-sm)',
-          color: 'var(--color-text-secondary)',
-          maxWidth: '440px',
-          lineHeight: '1.6',
-          marginBottom: 'var(--space-6)'
-        }}
-      >
-        The requested supply chain control tower resource, telemetry telemetry stream, or route could not be resolved within the active control grid.
-      </p>
-
-      <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
-        <Button
-          variant="outline"
-          icon={ArrowLeft}
-          onClick={() => window.history.back()}
-        >
-          Previous Node
-        </Button>
-        <Button
-          variant="primary"
-          icon={Home}
-          onClick={() => navigate('/dashboard')}
-        >
-          Return to Control Tower
-        </Button>
-      </div>
+        <div className="eyebrow" style={{ marginBottom: 10 }}>NAVIGATION / UNRESOLVED</div>
+        <div className="mono" style={{ fontSize: 54, letterSpacing: '-0.06em', color: 'var(--color-text-dim)' }}>404</div>
+        <h1 style={{ fontSize: 18, marginTop: 6 }}>This route is not in the control tower</h1>
+        <p style={{ fontSize: 11.5, color: 'var(--color-text-muted)', marginTop: 8, lineHeight: 1.6 }}>
+          The address you requested does not map to an operational module. Return to the network overview to continue.
+        </p>
+        <button className="btn btn-primary" style={{ marginTop: 18 }} onClick={() => navigate('/dashboard')}>
+          <ArrowLeft size={12} /> Back to control tower
+        </button>
+        <div style={{ marginTop: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, color: 'var(--color-text-dim)', fontSize: 9.5 }}>
+          <Compass size={11} /> Enterprise Supply Chain Control Tower
+        </div>
+      </motion.div>
     </div>
   );
 }

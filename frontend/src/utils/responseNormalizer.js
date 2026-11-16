@@ -13,6 +13,7 @@ export function normalizeList(response, fallback = []) {
   if (!response) return fallback;
   if (Array.isArray(response)) return response;
   if (Array.isArray(response.data)) return response.data;
+  if (response.data && Array.isArray(response.data.items)) return response.data.items;
   if (Array.isArray(response.items)) return response.items;
   return fallback;
 }
@@ -41,7 +42,7 @@ export function normalizeObject(response, fallback = {}) {
  * @returns {Object}
  */
 export function normalizePagination(response, items = [], page = 1, limit = 20) {
-  const totalItems = response?.pagination?.total || response?.count || items.length;
+  const totalItems = response?.pagination?.total || response?.data?.total || response?.count || items.length;
   const currentPage = Number(response?.pagination?.page || page || 1);
   const currentLimit = Number(response?.pagination?.limit || limit || 20);
   const totalPages = response?.pagination?.totalPages || Math.ceil(totalItems / currentLimit) || 1;

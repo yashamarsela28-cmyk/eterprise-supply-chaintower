@@ -1,640 +1,440 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
+import { RefreshCw, BarChart3, ShieldAlert, Truck, Factory, RotateCcw } from 'lucide-react';
 import {
-  TrendingUp,
-  Warehouse,
-  Truck,
-  Building2,
-  AlertTriangle,
-  DollarSign,
-  RefreshCw,
-  Boxes,
-  FileSpreadsheet,
-  Activity
-} from 'lucide-react';
-import { useApiQuery } from '../hooks/useApiQuery';
-import * as analyticsService from '../services/analyticsService';
-import { normalizeObject, normalizeList } from '../utils/responseNormalizer';
-import { AnimatedPageWrapper } from '../components/common/AnimatedPageWrapper';
+  getSupplyChainScorecard, getWarehouseKpis, getWarehouseUtilizationKpis,
+  getSupplierKpis, getShipmentKpis, getSupplyChainRiskKpis,
+  getInventoryAgingKpis, getPurchaseOrderPerformance, getReturnsQualityKpis
+} from '../services/analyticsService';
+import * as invoiceService from '../services/invoiceService';
+import * as customerService from '../services/customerService';
+import { normalizeList, normalizeObject } from '../utils/responseNormalizer';
 import { PageHeader } from '../components/common/PageHeader';
-import { Tabs } from '../components/common/Tabs';
-import { Card } from '../components/common/Card';
-import { KpiCard } from '../components/common/KpiCard';
-import { Table } from '../components/common/Table';
-import { Button } from '../components/common/Button';
+import { Panel, PanelHead, PanelBody, Stat, StatGrid, Meter } from '../components/common/Panel';
 import { LoadingState } from '../components/common/LoadingState';
-import { ProgressBar } from '../components/common/ProgressBar';
-import { BarChart } from '../components/common/BarChart';
-import { DonutGauge } from '../components/common/DonutGauge';
-import { formatCurrency, formatNumber, formatDate, formatPercentage } from '../utils/formatters';
+import { ErrorState } from '../components/common/ErrorState';
+import { formatCurrency, formatNumber, formatPercentage } from '../utils/formatters';
+import { pageStagger, riseIn } from '../utils/motion';
 
-/**
- * Enterprise Analytics & BI Intelligence Hub
- * Connected to 11 real analytics telemetry endpoints
- */
+const VIEWS = [
+  { id: 'executive', label: 'Executive', icon: BarChart3 },
+  { id: 'network', label: 'Network', icon: Factory },
+  { id: 'procurement', label: 'Procurement', icon: Truck },
+  { id: 'quality', label: 'Quality', icon: RotateCcw }
+];
+
+function countBy(rows, key) {
+  const m = {};
+  rows.forEach((r) => { const k = r[key] || 'UNKNOWN'; m[k] = (m[k] || 0) + 1; });
+  return Object.entries(m).sort((a, b) => b[1] - a[1]);
+}
+
 export function AnalyticsPage() {
-  const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('executive');
+  const [view, setView] = useState('executive');
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  // Executive Data
-  const { data: dashRaw, loading: dashLoading, refetch: refetchDash } = useApiQuery(
-    analyticsService.getControlTowerDashboard,
-    {},
-    { immediate: true }
-  );
-
-  const { data: scoreRaw, loading: scoreLoading, refetch: refetchScore } = useApiQuery(
-    analyticsService.getSupplyChainScorecard,
-    {},
-    { immediate: true }
-  );
-
-  // Warehouse KPIs
-  const { data: whKpisRaw, loading: whLoading, refetch: refetchWh } = useApiQuery(
-    analyticsService.getWarehouseKpis,
-    {},
-    { immediate: true }
-  );
-
-  // Supplier KPIs
-  const { data: supKpisRaw, loading: supLoading, refetch: refetchSup } = useApiQuery(
-    analyticsService.getSupplierKpis,
-    {},
-    { immediate: true }
-  );
-
-  // Customer Receivables
-  const { data: recRaw, loading: recLoading, refetch: refetchRec } = useApiQuery(
-    analyticsService.getCustomerReceivablesKpis,
-    {},
-    { immediate: true }
-  );
-
-  // Shipment KPIs
-  const { data: shipKpisRaw, loading: shipLoading, refetch: refetchShip } = useApiQuery(
-    analyticsService.getShipmentKpis,
-    {},
-    { immediate: true }
-  );
-
-  // Risk KPIs
-  const { data: riskRaw, loading: riskLoading, refetch: refetchRisk } = useApiQuery(
-    analyticsService.getSupplyChainRiskKpis,
-    {},
-    { immediate: true }
-  );
-
-  // Inventory Aging
-  const { data: agingRaw, loading: agingLoading, refetch: refetchAging } = useApiQuery(
-    analyticsService.getInventoryAgingKpis,
-    {},
-    { immediate: true }
-  );
-
-  // Utilization
-  const { data: utilRaw, loading: utilLoading, refetch: refetchUtil } = useApiQuery(
-    analyticsService.getWarehouseUtilizationKpis,
-    {},
-    { immediate: true }
-  );
-
-  // PO Performance
-  const { data: poPerfRaw, loading: poLoading, refetch: refetchPo } = useApiQuery(
-    analyticsService.getPurchaseOrderPerformance,
-    {},
-    { immediate: true }
-  );
-
-  // Returns Quality
-  const { data: retQualRaw, loading: retLoading, refetch: refetchRet } = useApiQuery(
-    analyticsService.getReturnsQualityKpis,
-    {},
-    { immediate: true }
-  );
-
-  const handleRefreshAll = () => {
-    refetchDash();
-    refetchScore();
-    refetchWh();
-    refetchSup();
-    refetchRec();
-    refetchShip();
-    refetchRisk();
-    refetchAging();
-    refetchUtil();
-    refetchPo();
-    refetchRet();
+  const load = () => {
+    setLoading(true); setError(null);
+    Promise.all([
+      getSupplyChainScorecard(), getWarehouseKpis(), getWarehouseUtilizationKpis(),
+      getSupplierKpis(), getShipmentKpis(), getSupplyChainRiskKpis(),
+      getInventoryAgingKpis(), getPurchaseOrderPerformance(), getReturnsQualityKpis(),
+      invoiceService.getInvoices({ limit: 200 }), customerService.getCustomers({ limit: 200 })
+    ]).then(([score, wh, util, sup, ship, risk, aging, po, ret, inv, cust]) => {
+      setData({
+        score: normalizeObject(score),
+        warehouses: normalizeList(wh),
+        utilization: normalizeList(util),
+        suppliers: normalizeList(sup),
+        shipments: normalizeList(ship),
+        risk: normalizeList(risk),
+        aging: normalizeList(aging),
+        purchaseOrders: normalizeList(po),
+        returns: normalizeList(ret),
+        invoices: normalizeList(inv),
+        customers: normalizeList(cust)
+      });
+      setLoading(false);
+    }).catch((e) => { setError(e?.message || 'Analytics service unavailable.'); setLoading(false); });
   };
+  useEffect(load, []);
 
-  // Safe Defensive Normalization
-  const dashboardMetrics = normalizeObject(dashRaw);
-  const scorecard = normalizeObject(scoreRaw);
-  const warehouseKpis = normalizeList(whKpisRaw);
-  const supplierKpis = normalizeList(supKpisRaw);
-  const receivablesKpis = normalizeList(recRaw);
-  const shipmentKpis = normalizeList(shipKpisRaw);
-  const riskKpis = normalizeList(riskRaw);
-  const agingKpis = normalizeList(agingRaw);
-  const utilizationKpis = normalizeList(utilRaw);
-  const poPerfList = normalizeList(poPerfRaw);
-  const returnsKpis = normalizeList(retQualRaw);
+  const derived = useMemo(() => {
+    if (!data) return {};
+    const shipStatus = countBy(data.shipments, 'status');
+    const shipPerf = countBy(data.shipments, 'delivery_performance');
+    const whValue = [...data.warehouses].sort((a, b) => Number(b.inventory_value) - Number(a.inventory_value));
+    const agingStatus = countBy(data.aging, 'aging_status');
+    const retReasons = countBy(data.returns, 'reason');
+    const retQuality = countBy(data.returns, 'quality_status');
+    const poPerf = countBy(data.purchaseOrders, 'delivery_performance');
 
-  const tabs = [
-    { id: 'executive', label: 'Executive Scorecard', icon: TrendingUp },
-    { id: 'warehouses', label: 'Warehouse Intelligence', icon: Warehouse },
-    { id: 'procurement', label: 'Supplier & PO Performance', icon: Building2 },
-    { id: 'logistics', label: 'Logistics & Transit', icon: Truck },
-    { id: 'risk', label: 'Risk & Quality Analysis', icon: AlertTriangle },
-    { id: 'finance', label: 'Financial Receivables', icon: DollarSign }
-  ];
+    // Supplier and account money is aggregated from transaction ledgers: the
+    // supplier/receivables analytical views fan out across child rows.
+    const supplierMap = new Map();
+    data.purchaseOrders.forEach((p) => {
+      const cur = supplierMap.get(p.supplier_name) || { name: p.supplier_name, count: 0, spend: 0, completed: 0 };
+      cur.count += 1;
+      cur.spend += Number(p.total_amount || 0);
+      if (p.status === 'RECEIVED') cur.completed += 1;
+      supplierMap.set(p.supplier_name, cur);
+    });
+    const supplierRows = [...supplierMap.values()].map((s) => {
+      const profile = data.suppliers.find((x) => x.supplier_name === s.name) || {};
+      return {
+        ...s,
+        rating: Number(profile.supplier_rating || 0),
+        completion: s.count ? (s.completed / s.count) * 100 : 0
+      };
+    }).sort((a, b) => b.spend - a.spend);
+
+    const accountMap = new Map();
+    data.invoices.forEach((i) => {
+      if (i.status === 'CANCELLED') return;
+      const cur = accountMap.get(i.customer_name) || {
+        name: i.customer_name,
+        type: (data.customers.find((c) => c.customer_name === i.customer_name) || {}).customer_type || '—',
+        invoiced: 0, paid: 0, outstanding: 0, overdue: 0
+      };
+      cur.invoiced += Number(i.total_amount || 0);
+      cur.paid += Number(i.paid_amount || 0);
+      cur.outstanding += Number(i.outstanding_amount || 0);
+      if (i.status === 'OVERDUE') cur.overdue += 1;
+      accountMap.set(i.customer_name, cur);
+    });
+    const accountRows = [...accountMap.values()].sort((a, b) => b.outstanding - a.outstanding);
+
+    return { shipStatus, shipPerf, whValue, agingStatus, retReasons, retQuality, poPerf, supplierRows, accountRows };
+  }, [data]);
+
+  if (loading) return <LoadingState message="Calculating network analytics…" fullPage />;
+  if (error) return <ErrorState title="Analytics unavailable" message={error} onRetry={load} />;
+
+  const { score = {}, warehouses = [], utilization = [], suppliers = [], shipments = [], risk = [], aging = [], purchaseOrders = [], returns = [] } = data;
 
   return (
-    <div className="analytics-page animate-fade-in">
-      <PageHeader
-        eyebrow="ANALYTICS // MULTI-ECHELON BI"
-        title="Supply Chain Analytics & Intelligence"
-        description="Comprehensive analytical views powered by automated data pipelines and real-time operational telemetry."
-        actions={
-          <Button
-            variant="outline"
-            size="sm"
-            icon={RefreshCw}
-            onClick={handleRefreshAll}
-          >
-            Refresh Analytics
-          </Button>
-        }
-      />
+    <motion.div className="page" variants={pageStagger} initial="hidden" animate="visible">
+      <motion.div variants={riseIn}>
+        <PageHeader
+          eyebrow="ANALYTICS / MULTI-ECHELON"
+          title="Supply chain report"
+          description="Warehouse economics, carrier performance, procurement reliability and reverse-logistics quality from the live analytical views."
+          actions={<button className="btn btn-outline" onClick={load}><RefreshCw size={11} /> Recalculate</button>}
+        />
+      </motion.div>
 
-      {/* Domain Navigation Tabs */}
-      <Tabs
-        tabs={tabs}
-        activeTab={activeTab}
-        onChange={setActiveTab}
-        variant="pills"
-      />
+      <motion.div variants={riseIn} className="chips">
+        {VIEWS.map((v) => {
+          const Icon = v.icon;
+          return (
+            <button key={v.id} className={`chip${view === v.id ? ' active' : ''}`} onClick={() => setView(v.id)}>
+              <Icon size={11} /> {v.label}
+            </button>
+          );
+        })}
+      </motion.div>
 
-      {/* Tab 1: Executive Scorecard */}
-      {activeTab === 'executive' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)', marginTop: 'var(--space-3)' }}>
-          {scoreLoading || dashLoading ? (
-            <LoadingState message="Calculating supply chain metrics..." />
-          ) : (
-            <>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-                  gap: 'var(--space-4)'
-                }}
-              >
-                <KpiCard
-                  title="Total Inventory Valuation"
-                  value={formatCurrency(scorecard.total_inventory_value || 0)}
-                  icon={DollarSign}
-                  color="primary"
-                  subtitle="Enterprise aggregated stock"
-                />
-                <KpiCard
-                  title="Fulfillment Efficiency"
-                  value={formatPercentage(scorecard.fulfillment_rate || 95)}
-                  icon={TrendingUp}
-                  color="success"
-                  trend={{ value: 'Target: 95.0%', isPositive: true }}
-                />
-                <KpiCard
-                  title="Active Warehouses"
-                  value={formatNumber(scorecard.active_warehouses || 3)}
-                  icon={Warehouse}
-                  color="info"
-                  subtitle="Operational distribution hubs"
-                />
-                <KpiCard
-                  title="Open Purchase Orders"
-                  value={formatNumber(scorecard.open_purchase_orders || 0)}
-                  icon={FileSpreadsheet}
-                  color="purple"
-                  subtitle="Inbound procurement pipeline"
-                />
+      <motion.div
+        key={view}
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.22 }}
+      >
+          {view === 'executive' && (
+            <div style={{ display: 'grid', gap: 14 }}>
+              <StatGrid cols={4}>
+                <Stat label="Inventory units" value={formatNumber(score.total_inventory_units)} meta={`${formatNumber(score.active_products)} active SKUs`} />
+                <Stat label="Order execution" value={formatPercentage(score.order_execution_rate)} meta="Completed order rate" tone="good" />
+                <Stat label="On-time delivery" value={formatPercentage(score.on_time_delivery_rate)} meta="Carrier SLA" tone="good" />
+                <Stat label="Receivables" value={formatCurrency(score.outstanding_receivables)} meta={`${score.overdue_invoices || 0} overdue invoices`} tone="warn" />
+              </StatGrid>
+
+              <div className="split split-2">
+                <Panel>
+                  <PanelHead title="Execution health" subtitle="Order, procurement and delivery completion" />
+                  <PanelBody style={{ display: 'grid', gap: 14 }}>
+                    <Meter label="Order execution" right={formatPercentage(score.order_execution_rate)} value={score.order_execution_rate} tone="good" />
+                    <Meter label="Purchase completion" right={formatPercentage(score.purchase_completion_rate)} value={score.purchase_completion_rate} tone="warn" />
+                    <Meter label="On-time delivery" right={formatPercentage(score.on_time_delivery_rate)} value={score.on_time_delivery_rate} tone="good" />
+                  </PanelBody>
+                </Panel>
+
+                <Panel>
+                  <PanelHead title="Risk register" subtitle="Threshold breaches by category" action={<ShieldAlert size={12} style={{ color: 'var(--color-text-muted)' }} />} />
+                  <PanelBody style={{ display: 'grid', gap: 6 }}>
+                    {risk.map((r) => (
+                      <div key={r.risk_type} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--color-border-subtle)' }}>
+                        <span style={{ flex: 1, fontSize: 10.5, color: 'var(--color-text-secondary)' }}>{r.risk_type.replace(/_/g, ' ')}</span>
+                        <span className="mono" style={{ fontSize: 11 }}>{r.risk_count}</span>
+                        <span className={`badge badge-${r.risk_level === 'CRITICAL' ? 'danger' : r.risk_level === 'WARNING' ? 'warning' : 'neutral'}`}>{r.risk_level}</span>
+                      </div>
+                    ))}
+                  </PanelBody>
+                </Panel>
               </div>
 
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))',
-                  gap: 'var(--space-5)'
-                }}
-              >
-                {/* Fulfillment Donut Gauge */}
-                <Card
-                  title="Fulfillment SLA Performance"
-                  subtitle="Enterprise benchmark compliance across all processed customer orders"
-                  headerBorder
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
-                    <DonutGauge
-                      value={Number(scorecard.fulfillment_rate) || 95}
-                      max={100}
-                      size={150}
-                      strokeWidth={12}
-                      label="Order SLA Compliance"
-                      sublabel="Target 95%"
-                      status="success"
-                    />
-                  </div>
-                </Card>
+              <div className="split split-2">
+                <Panel>
+                  <PanelHead title="Inventory value by facility" subtitle="Capital held per distribution centre" />
+                  <PanelBody style={{ display: 'grid', gap: 11 }}>
+                    {derived.whValue?.map((w) => {
+                      const max = Math.max(...warehouses.map((x) => Number(x.inventory_value) || 1));
+                      return (
+                        <div key={w.warehouse_id}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <span style={{ fontSize: 10.5, color: 'var(--color-text-secondary)' }}>{w.warehouse_name}</span>
+                            <span className="mono" style={{ fontSize: 9.5, color: 'var(--color-text-muted)' }}>{formatCurrency(w.inventory_value)}</span>
+                          </div>
+                          <Meter value={(Number(w.inventory_value) / max) * 100} />
+                        </div>
+                      );
+                    })}
+                  </PanelBody>
+                </Panel>
 
-                {/* Warehouse Valuation Chart */}
-                <Card
-                  title="Stock Valuation by Facility"
-                  subtitle="Distributed asset inventory value per registered physical hub"
-                  headerBorder
-                >
-                  <BarChart
-                    data={warehouseKpis.map((w) => ({
-                      label: w.warehouse_name || w.warehouse_code || 'Hub',
-                      value: Number(w.total_inventory_value) || 0
-                    }))}
-                    valueFormatter={formatCurrency}
-                    orientation="horizontal"
-                    barColor="var(--color-border-strong)"
-                    highlightMax
-                  />
-                </Card>
+                <Panel>
+                  <PanelHead title="Shipment status mix" subtitle={`${formatNumber(shipments.length)} tracked movements`} />
+                  <PanelBody style={{ display: 'grid', gap: 9 }}>
+                    {derived.shipStatus?.map(([k, v]) => (
+                      <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                        <span style={{ width: 88, fontSize: 10, color: 'var(--color-text-secondary)' }}>{k.replace('_', ' ')}</span>
+                        <div style={{ flex: 1 }}><Meter value={(v / shipments.length) * 100} /></div>
+                        <span className="mono" style={{ width: 24, textAlign: 'right', fontSize: 10 }}>{v}</span>
+                      </div>
+                    ))}
+                  </PanelBody>
+                </Panel>
               </div>
-
-              <Card title="Control Tower Operations Overview" subtitle="System-wide performance aggregates across all business nodes" headerBorder>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--space-3)' }}>
-                  <div style={{ padding: '0.85rem 1rem', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
-                    <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Catalog Products</span>
-                    <span style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)', display: 'block', marginTop: '0.2rem' }}>
-                      {formatNumber(dashboardMetrics.total_products || 0)}
-                    </span>
-                  </div>
-                  <div style={{ padding: '0.85rem 1rem', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
-                    <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Active Suppliers</span>
-                    <span style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)', display: 'block', marginTop: '0.2rem' }}>
-                      {formatNumber(dashboardMetrics.active_suppliers || 0)}
-                    </span>
-                  </div>
-                  <div style={{ padding: '0.85rem 1rem', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
-                    <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Orders Processed</span>
-                    <span style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)', display: 'block', marginTop: '0.2rem' }}>
-                      {formatNumber(dashboardMetrics.total_orders || 0)}
-                    </span>
-                  </div>
-                  <div style={{ padding: '0.85rem 1rem', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
-                    <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Active Freight Shipments</span>
-                    <span style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)', display: 'block', marginTop: '0.2rem' }}>
-                      {formatNumber(dashboardMetrics.active_shipments || 0)}
-                    </span>
-                  </div>
-                </div>
-              </Card>
-            </>
+            </div>
           )}
-        </div>
-      )}
 
-      {/* Tab 2: Warehouse Intelligence */}
-      {activeTab === 'warehouses' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)', marginTop: 'var(--space-3)' }}>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))',
-              gap: 'var(--space-5)'
-            }}
-          >
-            {/* Warehouse Capacity Bars */}
-            <Card title="Warehouse Space Utilization" subtitle="Real-time occupancy versus max capacity limits" headerBorder>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
-                {utilizationKpis.map((wh, idx) => (
-                  <ProgressBar
-                    key={idx}
-                    label={`${wh.warehouse_name || 'Warehouse'} (${formatNumber(wh.utilized_capacity || 0)} / ${formatNumber(wh.total_capacity || 0)} units)`}
-                    value={Number(wh.utilization_rate) || 0}
-                    max={100}
-                    showValue
-                    thresholds={{ warning: 75, danger: 90 }}
-                  />
-                ))}
+          {view === 'network' && (
+            <div style={{ display: 'grid', gap: 14 }}>
+              <StatGrid cols={4}>
+                <Stat label="Facilities" value={formatNumber(warehouses.length)} meta="Distribution centres" />
+                <Stat label="Stock units" value={formatNumber(warehouses.reduce((s, w) => s + Number(w.total_stock_units || 0), 0))} meta="Across the network" />
+                <Stat label="Inventory value" value={formatCurrency(warehouses.reduce((s, w) => s + Number(w.inventory_value || 0), 0))} meta="Valued stock" />
+                <Stat label="In transit" value={formatNumber(warehouses.reduce((s, w) => s + Number(w.shipments_in_transit || 0), 0))} meta="Active outbound freight" tone="accent" />
+              </StatGrid>
+
+              <Panel>
+                <PanelHead title="Facility scorecard" subtitle="Capacity, stock and demand load by hub" />
+                <PanelBody flush>
+                  <div className="table-scroll">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Facility</th><th>City</th>
+                          <th style={{ textAlign: 'right' }}>Units</th>
+                          <th style={{ textAlign: 'right' }}>Reserved</th>
+                          <th style={{ textAlign: 'right' }}>Value</th>
+                          <th style={{ width: 150 }}>Capacity used</th>
+                          <th style={{ textAlign: 'right' }}>Orders</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {warehouses.map((w) => {
+                          const u = utilization.find((x) => x.warehouse_id === w.warehouse_id);
+                          return (
+                            <tr key={w.warehouse_id}>
+                              <td><div className="cell-strong">{w.warehouse_name}</div><div className="cell-sub mono">{w.warehouse_code}</div></td>
+                              <td>{w.city}</td>
+                              <td className="mono" style={{ textAlign: 'right' }}>{formatNumber(w.total_stock_units)}</td>
+                              <td className="mono" style={{ textAlign: 'right' }}>{formatNumber(w.reserved_stock_units)}</td>
+                              <td className="num" style={{ textAlign: 'right' }}>{formatCurrency(w.inventory_value)}</td>
+                              <td>
+                                <Meter value={u?.utilization_percentage || 0} tone={(u?.utilization_percentage || 0) > 85 ? 'bad' : 'good'} />
+                                <div className="mono" style={{ fontSize: 8, color: 'var(--color-text-muted)', marginTop: 3 }}>{formatPercentage(u?.utilization_percentage || 0)}</div>
+                              </td>
+                              <td className="mono" style={{ textAlign: 'right' }}>{formatNumber(w.active_orders)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </PanelBody>
+              </Panel>
+
+              <div className="split split-2">
+                <Panel>
+                  <PanelHead title="Inventory aging" subtitle="Batch status across all facilities" />
+                  <PanelBody style={{ display: 'grid', gap: 10 }}>
+                    {derived.agingStatus?.map(([k, v]) => (
+                      <div key={k}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <span style={{ fontSize: 10.5, color: 'var(--color-text-secondary)' }}>{k.replace('_', ' ')}</span>
+                          <span className="mono" style={{ fontSize: 9.5, color: 'var(--color-text-muted)' }}>{v} batches</span>
+                        </div>
+                        <Meter value={(v / Math.max(1, aging.length)) * 100} tone={k === 'EXPIRED' ? 'bad' : k === 'AGING' ? 'warn' : 'good'} />
+                      </div>
+                    ))}
+                  </PanelBody>
+                </Panel>
+                <Panel>
+                  <PanelHead title="Delivery performance" subtitle="Shipment outcomes by SLA" />
+                  <PanelBody style={{ display: 'grid', gap: 10 }}>
+                    {derived.shipPerf?.map(([k, v]) => (
+                      <div key={k}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <span style={{ fontSize: 10.5, color: 'var(--color-text-secondary)' }}>{k.replace('_', ' ')}</span>
+                          <span className="mono" style={{ fontSize: 9.5, color: 'var(--color-text-muted)' }}>{v} shipments</span>
+                        </div>
+                        <Meter value={(v / Math.max(1, shipments.length)) * 100} tone={k === 'LATE' ? 'bad' : 'good'} />
+                      </div>
+                    ))}
+                    <div style={{ borderTop: '1px solid var(--color-border-subtle)', paddingTop: 8, display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>Total freight cost</span>
+                      <span className="mono" style={{ fontSize: 10 }}>{formatCurrency(shipments.reduce((s, x) => s + Number(x.shipping_cost || 0), 0))}</span>
+                    </div>
+                  </PanelBody>
+                </Panel>
               </div>
-            </Card>
+            </div>
+          )}
 
-            {/* Warehouse SKU Units Chart */}
-            <Card title="SKU Volume Distribution" subtitle="Physical unit inventory counts by warehouse facility" headerBorder>
-              <BarChart
-                data={warehouseKpis.map((w) => ({
-                  label: w.warehouse_name || w.warehouse_code || 'Hub',
-                  value: Number(w.total_units) || 0
-                }))}
-                valueFormatter={formatNumber}
-                orientation="horizontal"
-                barColor="var(--color-border-strong)"
-              />
-            </Card>
-          </div>
+          {view === 'procurement' && (
+            <div style={{ display: 'grid', gap: 14 }}>
+              <StatGrid cols={4}>
+                <Stat label="Suppliers" value={formatNumber(suppliers.length)} meta="Active vendor records" />
+                <Stat label="Committed spend" value={formatCurrency(purchaseOrders.reduce((s, x) => s + Number(x.total_amount || 0), 0))} meta="Total PO value" />
+                <Stat label="Open POs" value={formatNumber(purchaseOrders.filter((p) => !['RECEIVED', 'CANCELLED'].includes(p.status)).length)} meta="Inbound in progress" tone="accent" />
+                <Stat label="Completed POs" value={formatNumber(purchaseOrders.filter((p) => p.status === 'RECEIVED').length)} meta="Fully received" tone="good" />
+              </StatGrid>
 
-          <Card title="Warehouse KPI Matrix" subtitle="Detailed inventory and throughput statistics per warehouse facility" headerBorder>
-            <Table
-              loading={whLoading}
-              columns={[
-                { key: 'warehouse_name', header: 'Warehouse Facility' },
-                { key: 'warehouse_code', header: 'Facility Code', render: (r) => <span style={{ fontFamily: 'var(--font-mono)' }}>{r.warehouse_code}</span> },
-                { key: 'total_skus', header: 'Total SKUs', align: 'right', render: (r) => <span style={{ fontFamily: 'var(--font-mono)' }}>{formatNumber(r.total_skus || 0)}</span> },
-                { key: 'total_units', header: 'Total Units', align: 'right', render: (r) => <span style={{ fontFamily: 'var(--font-mono)' }}>{formatNumber(r.total_units || 0)}</span> },
-                { key: 'total_inventory_value', header: 'Inventory Value', align: 'right', render: (r) => <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{formatCurrency(r.total_inventory_value || 0)}</span> },
-                { key: 'low_stock_skus', header: 'Low Stock Alerts', align: 'right', render: (r) => (
-                  <span style={{ color: r.low_stock_skus > 0 ? 'var(--color-warning-text)' : 'var(--color-success-text)', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
-                    {r.low_stock_skus || 0}
-                  </span>
-                )}
-              ]}
-              data={warehouseKpis}
-            />
-          </Card>
+              <div className="split split-2">
+                <Panel>
+                  <PanelHead title="Supplier spend" subtitle="Committed value by vendor" />
+                  <PanelBody style={{ display: 'grid', gap: 10 }}>
+                    {derived.supplierRows?.map((s) => {
+                      const max = derived.supplierRows[0]?.spend || 1;
+                      return (
+                        <div key={s.name}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, gap: 8 }}>
+                            <span className="truncate" style={{ fontSize: 10.5, color: 'var(--color-text-secondary)' }}>{s.name}</span>
+                            <span className="mono" style={{ fontSize: 9.5, color: 'var(--color-text-muted)' }}>{formatCurrency(s.spend)}</span>
+                          </div>
+                          <Meter value={(s.spend / max) * 100} />
+                        </div>
+                      );
+                    })}
+                  </PanelBody>
+                </Panel>
 
-          <Card title="Inventory Aging & Turnover Risk" subtitle="Age distribution of sitting stock across product categories" headerBorder>
-            <Table
-              loading={agingLoading}
-              columns={[
-                { key: 'sku', header: 'SKU', render: (r) => <span style={{ fontFamily: 'var(--font-mono)' }}>{r.sku}</span> },
-                { key: 'product_name', header: 'Product Name', render: (r) => <span style={{ fontWeight: 600 }}>{r.product_name}</span> },
-                { key: 'category', header: 'Category' },
-                { key: 'quantity', header: 'Quantity', align: 'right', render: (r) => <span style={{ fontFamily: 'var(--font-mono)' }}>{formatNumber(r.quantity || 0)}</span> },
-                { key: 'days_in_inventory', header: 'Aging (Days)', align: 'right', render: (r) => <span style={{ fontFamily: 'var(--font-mono)' }}>{r.days_in_inventory || 0}d</span> },
-                { key: 'aging_bucket', header: 'Risk Tier', render: (r) => (
-                  <span style={{ color: r.aging_bucket?.includes('90+') ? 'var(--color-danger-text)' : 'var(--color-text-secondary)', fontWeight: 600 }}>
-                    {r.aging_bucket || '0-30 Days'}
-                  </span>
-                )}
-              ]}
-              data={agingKpis}
-            />
-          </Card>
-        </div>
-      )}
+                <Panel>
+                  <PanelHead title="Supplier reliability" subtitle="Completion rate and rating" />
+                  <PanelBody style={{ display: 'grid', gap: 0 }}>
+                    {[...(derived.supplierRows || [])].sort((a, b) => b.completion - a.completion).map((s) => (
+                      <div key={s.name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderBottom: '1px solid var(--color-border-subtle)' }}>
+                        <span className="truncate" style={{ flex: 1, fontSize: 10.5 }}>{s.name}</span>
+                        <span className="mono" style={{ fontSize: 9, color: 'var(--color-text-muted)' }}>★ {s.rating.toFixed(1)}</span>
+                        <span className="mono" style={{ fontSize: 10, width: 44, textAlign: 'right' }}>{formatPercentage(s.completion)}</span>
+                      </div>
+                    ))}
+                  </PanelBody>
+                </Panel>
+              </div>
 
-      {/* Tab 3: Suppliers & PO Performance */}
-      {activeTab === 'procurement' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)', marginTop: 'var(--space-3)' }}>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))',
-              gap: 'var(--space-5)'
-            }}
-          >
-            {/* Supplier Spend Chart */}
-            <Card title="Supplier Procurement Spend" subtitle="Total capital allocated per supplier partner" headerBorder>
-              <BarChart
-                data={supplierKpis.map((s) => ({
-                  label: s.supplier_name || 'Vendor',
-                  value: Number(s.total_spend) || 0
-                }))}
-                valueFormatter={formatCurrency}
-                orientation="horizontal"
-                barColor="var(--color-border-strong)"
-                highlightMax
-              />
-            </Card>
+              <Panel>
+                <PanelHead title="Purchase order receipt performance" subtitle="Ordered vs received units and delivery status" />
+                <PanelBody flush>
+                  <div className="table-scroll">
+                    <table className="data-table">
+                      <thead>
+                        <tr><th>PO</th><th>Supplier</th><th>Hub</th><th style={{ textAlign: 'right' }}>Ordered</th><th style={{ textAlign: 'right' }}>Received</th><th style={{ width: 150 }}>Receipt</th><th>Performance</th></tr>
+                      </thead>
+                      <tbody>
+                        {purchaseOrders.slice(0, 14).map((p) => (
+                          <tr key={p.purchase_order_id}>
+                            <td className="mono" style={{ fontSize: 10 }}>{p.po_number}</td>
+                            <td className="cell-strong">{p.supplier_name}</td>
+                            <td>{p.warehouse_name}</td>
+                            <td className="mono" style={{ textAlign: 'right' }}>{formatNumber(p.ordered_units)}</td>
+                            <td className="mono" style={{ textAlign: 'right' }}>{formatNumber(p.received_units)}</td>
+                            <td><Meter value={p.receiving_percentage} tone={p.receiving_percentage >= 100 ? 'good' : 'warn'} /></td>
+                            <td style={{ fontSize: 10 }}>{p.delivery_performance?.replace('_', ' ')}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </PanelBody>
+              </Panel>
+            </div>
+          )}
 
-            {/* Supplier On-Time Delivery Chart */}
-            <Card title="Supplier On-Time SLA Rates" subtitle="Percentage of shipments delivered on or before promised date" headerBorder>
-              <BarChart
-                data={supplierKpis.map((s) => ({
-                  label: s.supplier_name || 'Vendor',
-                  value: Number(s.on_time_delivery_rate) || 100
-                }))}
-                valueFormatter={formatPercentage}
-                orientation="horizontal"
-                barColor="var(--color-border-strong)"
-              />
-            </Card>
-          </div>
+          {view === 'quality' && (
+            <div style={{ display: 'grid', gap: 14 }}>
+              <StatGrid cols={4}>
+                <Stat label="Returns" value={formatNumber(returns.length)} meta="Reverse-logistics cases" />
+                <Stat label="Quality issues" value={formatNumber(returns.reduce((s, r) => s + Number(r.quality_issue_units || 0), 0))} meta="Units flagged" tone="bad" />
+                <Stat label="Received units" value={formatNumber(returns.reduce((s, r) => s + Number(r.received_units || 0), 0))} meta="Inspected back into stock" />
+                <Stat label="Receivable accounts" value={formatNumber(derived.accountRows?.filter((r) => r.outstanding > 0).length || 0)} meta={`${formatNumber(score.overdue_invoices || 0)} overdue invoices`} tone="warn" />
+              </StatGrid>
 
-          <Card title="Supplier KPI Scorecard" subtitle="Fulfillment reliability, lead times, and spend distribution" headerBorder>
-            <Table
-              loading={supLoading}
-              columns={[
-                { key: 'supplier_name', header: 'Supplier Name', render: (r) => <span style={{ fontWeight: 600 }}>{r.supplier_name}</span> },
-                { key: 'total_po_count', header: 'Total POs', align: 'right', render: (r) => <span style={{ fontFamily: 'var(--font-mono)' }}>{formatNumber(r.total_po_count || 0)}</span> },
-                { key: 'total_spend', header: 'Total Spend', align: 'right', render: (r) => <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{formatCurrency(r.total_spend || 0)}</span> },
-                { key: 'on_time_delivery_rate', header: 'On-Time Rate', align: 'right', render: (r) => (
-                  <span style={{ color: 'var(--color-success-text)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-                    {formatPercentage(r.on_time_delivery_rate || 100)}
-                  </span>
-                )},
-                { key: 'quality_rating', header: 'Rating', align: 'right', render: (r) => <span style={{ fontFamily: 'var(--font-mono)' }}>{r.quality_rating || 5.0} / 5.0</span> }
-              ]}
-              data={supplierKpis}
-            />
-          </Card>
+              <div className="split split-2">
+                <Panel>
+                  <PanelHead title="Return reasons" subtitle="Why customers send stock back" />
+                  <PanelBody style={{ display: 'grid', gap: 10 }}>
+                    {derived.retReasons?.map(([k, v]) => (
+                      <div key={k}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <span style={{ fontSize: 10.5, color: 'var(--color-text-secondary)' }}>{k.replace(/_/g, ' ')}</span>
+                          <span className="mono" style={{ fontSize: 9.5, color: 'var(--color-text-muted)' }}>{v}</span>
+                        </div>
+                        <Meter value={(v / Math.max(1, returns.length)) * 100} tone="warn" />
+                      </div>
+                    ))}
+                  </PanelBody>
+                </Panel>
+                <Panel>
+                  <PanelHead title="Quality disposition" subtitle="Inspection outcomes of returns" />
+                  <PanelBody style={{ display: 'grid', gap: 10 }}>
+                    {derived.retQuality?.map(([k, v]) => (
+                      <div key={k}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <span style={{ fontSize: 10.5, color: 'var(--color-text-secondary)' }}>{k.replace(/_/g, ' ')}</span>
+                          <span className="mono" style={{ fontSize: 9.5, color: 'var(--color-text-muted)' }}>{v}</span>
+                        </div>
+                        <Meter value={(v / Math.max(1, returns.length)) * 100} tone={k === 'QUALITY_ISSUE' ? 'bad' : 'good'} />
+                      </div>
+                    ))}
+                    <div style={{ borderTop: '1px solid var(--color-border-subtle)', paddingTop: 8, display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>Return units requested</span>
+                      <span className="mono" style={{ fontSize: 10 }}>{formatNumber(returns.reduce((s, r) => s + Number(r.requested_units || 0), 0))}</span>
+                    </div>
+                  </PanelBody>
+                </Panel>
+              </div>
 
-          <Card title="Purchase Order Performance Tracking" subtitle="Procurement order lifecycles, lead times, and receipt fulfillment" headerBorder>
-            <Table
-              loading={poLoading}
-              columns={[
-                { key: 'po_number', header: 'PO Number', render: (r) => <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{r.po_number}</span> },
-                { key: 'supplier_name', header: 'Supplier' },
-                { key: 'status', header: 'Status', render: (r) => <span style={{ textTransform: 'capitalize' }}>{r.status}</span> },
-                { key: 'total_amount', header: 'Amount', align: 'right', render: (r) => <span style={{ fontFamily: 'var(--font-mono)' }}>{formatCurrency(r.total_amount || 0)}</span> },
-                { key: 'lead_time_days', header: 'Lead Time', align: 'right', render: (r) => <span style={{ fontFamily: 'var(--font-mono)' }}>{r.lead_time_days || 0} days</span> }
-              ]}
-              data={poPerfList}
-            />
-          </Card>
-        </div>
-      )}
-
-      {/* Tab 4: Logistics & Shipping */}
-      {activeTab === 'logistics' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)', marginTop: 'var(--space-3)' }}>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))',
-              gap: 'var(--space-5)'
-            }}
-          >
-            {/* Carrier Shipment Volume */}
-            <Card title="Carrier Volume Distribution" subtitle="Total freight loads handled per logistics carrier" headerBorder>
-              <BarChart
-                data={shipmentKpis.map((c) => ({
-                  label: c.carrier || 'Carrier',
-                  value: Number(c.total_shipments) || 0
-                }))}
-                valueFormatter={formatNumber}
-                orientation="horizontal"
-                barColor="var(--color-border-strong)"
-              />
-            </Card>
-
-            {/* Carrier On-Time Performance */}
-            <Card title="Carrier On-Time Delivery Rates" subtitle="Freight SLA delivery compliance percentage" headerBorder>
-              <BarChart
-                data={shipmentKpis.map((c) => ({
-                  label: c.carrier || 'Carrier',
-                  value: Number(c.on_time_delivery_rate) || 98
-                }))}
-                valueFormatter={formatPercentage}
-                orientation="horizontal"
-                barColor="var(--color-border-strong)"
-              />
-            </Card>
-          </div>
-
-          <Card title="Shipment & Carrier Performance" subtitle="Transit times, carrier on-time rates, and exception metrics" headerBorder>
-            <Table
-              loading={shipLoading}
-              columns={[
-                { key: 'carrier', header: 'Carrier Partner', render: (r) => <span style={{ fontWeight: 600 }}>{r.carrier}</span> },
-                { key: 'total_shipments', header: 'Total Shipments', align: 'right', render: (r) => <span style={{ fontFamily: 'var(--font-mono)' }}>{formatNumber(r.total_shipments || 0)}</span> },
-                { key: 'delivered_count', header: 'Delivered', align: 'right', render: (r) => <span style={{ fontFamily: 'var(--font-mono)' }}>{formatNumber(r.delivered_count || 0)}</span> },
-                { key: 'in_transit_count', header: 'In Transit', align: 'right', render: (r) => <span style={{ fontFamily: 'var(--font-mono)' }}>{formatNumber(r.in_transit_count || 0)}</span> },
-                { key: 'avg_transit_days', header: 'Avg Transit', align: 'right', render: (r) => <span style={{ fontFamily: 'var(--font-mono)' }}>{r.avg_transit_days || 0}d</span> },
-                { key: 'on_time_delivery_rate', header: 'On-Time %', align: 'right', render: (r) => (
-                  <span style={{ color: 'var(--color-success-text)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-                    {formatPercentage(r.on_time_delivery_rate || 98)}
-                  </span>
-                )}
-              ]}
-              data={shipmentKpis}
-            />
-          </Card>
-        </div>
-      )}
-
-      {/* Tab 5: Risk & Quality */}
-      {activeTab === 'risk' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)', marginTop: 'var(--space-3)' }}>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))',
-              gap: 'var(--space-5)'
-            }}
-          >
-            {/* Risk Impact Scores */}
-            <Card title="Supply Chain Vulnerability Index" subtitle="Assessed impact score by risk domain category" headerBorder>
-              <BarChart
-                data={riskKpis.map((r) => ({
-                  label: r.risk_category || 'Risk Item',
-                  value: Number(r.impact_score) || 0
-                }))}
-                valueFormatter={(v) => `${v} / 100`}
-                orientation="horizontal"
-                barColor="var(--color-danger-bg)"
-                highlightMax
-              />
-            </Card>
-
-            {/* Returns by Product */}
-            <Card title="Return Rates by Product Line" subtitle="RMA percentage of fulfilled units" headerBorder>
-              <BarChart
-                data={returnsKpis.map((rk) => ({
-                  label: rk.product_name || 'Product',
-                  value: Number(rk.return_rate) || 0
-                }))}
-                valueFormatter={formatPercentage}
-                orientation="horizontal"
-                barColor="var(--color-warning-bg)"
-              />
-            </Card>
-          </div>
-
-          <Card title="Supply Chain Risk Indicators" subtitle="Concentration risks, supplier vulnerabilities, and inventory bottlenecks" headerBorder>
-            <Table
-              loading={riskLoading}
-              columns={[
-                { key: 'risk_category', header: 'Risk Category', render: (r) => <span style={{ fontWeight: 600 }}>{r.risk_category}</span> },
-                { key: 'description', header: 'Risk Description' },
-                { key: 'severity', header: 'Severity', render: (r) => (
-                  <span style={{ color: r.severity === 'HIGH' ? 'var(--color-danger-text)' : 'var(--color-warning-text)', fontWeight: 600 }}>
-                    {r.severity}
-                  </span>
-                )},
-                { key: 'impact_score', header: 'Impact Score', align: 'right', render: (r) => <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{r.impact_score || 0} / 100</span> }
-              ]}
-              data={riskKpis}
-            />
-          </Card>
-
-          <Card title="Returns & Quality Analysis" subtitle="Defect rates, RMA volumes, and vendor return percentages" headerBorder>
-            <Table
-              loading={retLoading}
-              columns={[
-                { key: 'product_name', header: 'Product', render: (r) => <span style={{ fontWeight: 600 }}>{r.product_name}</span> },
-                { key: 'total_returns', header: 'Total Returns', align: 'right', render: (r) => <span style={{ fontFamily: 'var(--font-mono)' }}>{formatNumber(r.total_returns || 0)}</span> },
-                { key: 'return_rate', header: 'Return Rate', align: 'right', render: (r) => <span style={{ fontFamily: 'var(--font-mono)' }}>{formatPercentage(r.return_rate || 0)}</span> },
-                { key: 'primary_reason', header: 'Primary Reason' }
-              ]}
-              data={returnsKpis}
-            />
-          </Card>
-        </div>
-      )}
-
-      {/* Tab 6: Financial Receivables */}
-      {activeTab === 'finance' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)', marginTop: 'var(--space-3)' }}>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))',
-              gap: 'var(--space-5)'
-            }}
-          >
-            {/* Customer Outstanding Balance Chart */}
-            <Card title="Outstanding Balances by Account" subtitle="Total accounts receivable balance per enterprise customer" headerBorder>
-              <BarChart
-                data={receivablesKpis.map((c) => ({
-                  label: c.customer_name || 'Customer',
-                  value: Number(c.total_outstanding) || 0
-                }))}
-                valueFormatter={formatCurrency}
-                orientation="horizontal"
-                barColor="var(--color-border-strong)"
-                highlightMax
-              />
-            </Card>
-
-            {/* Customer Overdue Balance Chart */}
-            <Card title="Overdue Aging Balances" subtitle="Capital exceeding contractual payment terms" headerBorder>
-              <BarChart
-                data={receivablesKpis.map((c) => ({
-                  label: c.customer_name || 'Customer',
-                  value: Number(c.overdue_amount) || 0
-                }))}
-                valueFormatter={formatCurrency}
-                orientation="horizontal"
-                barColor="var(--color-danger-bg)"
-              />
-            </Card>
-          </div>
-
-          <Card title="Customer Receivables & Credit Aging" subtitle="Outstanding balances, overdue invoices, and credit risk profiles" headerBorder>
-            <Table
-              loading={recLoading}
-              columns={[
-                { key: 'customer_name', header: 'Customer', render: (r) => <span style={{ fontWeight: 600 }}>{r.customer_name}</span> },
-                { key: 'total_outstanding', header: 'Outstanding Balance', align: 'right', render: (r) => <span style={{ fontFamily: 'var(--font-mono)' }}>{formatCurrency(r.total_outstanding || 0)}</span> },
-                { key: 'overdue_amount', header: 'Overdue Amount', align: 'right', render: (r) => (
-                  <span style={{ color: r.overdue_amount > 0 ? 'var(--color-danger-text)' : 'var(--color-success-text)', fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
-                    {formatCurrency(r.overdue_amount || 0)}
-                  </span>
-                )},
-                { key: 'credit_limit', header: 'Credit Limit', align: 'right', render: (r) => <span style={{ fontFamily: 'var(--font-mono)' }}>{formatCurrency(r.credit_limit || 0)}</span> },
-                { key: 'credit_utilization', header: 'Credit Util %', align: 'right', render: (r) => <span style={{ fontFamily: 'var(--font-mono)' }}>{formatPercentage(r.credit_utilization || 0)}</span> }
-              ]}
-              data={receivablesKpis}
-            />
-          </Card>
-        </div>
-      )}
-    </div>
+              <Panel>
+                <PanelHead title="Receivables by account" subtitle="Highest outstanding balances" />
+                <PanelBody flush>
+                  <div className="table-scroll">
+                    <table className="data-table">
+                      <thead><tr><th>Account</th><th>Type</th><th style={{ textAlign: 'right' }}>Invoiced</th><th style={{ textAlign: 'right' }}>Paid</th><th style={{ textAlign: 'right' }}>Outstanding</th><th style={{ textAlign: 'right' }}>Overdue</th></tr></thead>
+                      <tbody>
+                        {derived.accountRows?.slice(0, 10).map((r) => (
+                          <tr key={r.name}>
+                            <td className="cell-strong">{r.name}</td>
+                            <td style={{ fontSize: 10 }}>{r.type}</td>
+                            <td className="num" style={{ textAlign: 'right' }}>{formatCurrency(r.invoiced)}</td>
+                            <td className="num" style={{ textAlign: 'right' }}>{formatCurrency(r.paid)}</td>
+                            <td className="num" style={{ textAlign: 'right', color: 'var(--color-warning-text)' }}>{formatCurrency(r.outstanding)}</td>
+                            <td className="mono" style={{ textAlign: 'right' }}>{r.overdue || 0}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </PanelBody>
+              </Panel>
+            </div>
+          )}
+      </motion.div>
+    </motion.div>
   );
 }
 

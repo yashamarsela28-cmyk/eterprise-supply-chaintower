@@ -1,459 +1,179 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  Warehouse, MapPin, Users, Package, TrendingUp, RefreshCw, Search,
-  Building2, Globe, Phone, Mail, Clock, AlertCircle
-} from 'lucide-react';
-import { useApiQuery } from '../hooks/useApiQuery';
-import { usePagination } from '../hooks/usePagination';
+import { RefreshCw, Warehouse, MapPin, ArrowUpRight, X, Boxes } from 'lucide-react';
 import * as warehouseService from '../services/warehouseService';
-import { normalizeList, normalizePagination } from '../utils/responseNormalizer';
-import { formatNumber, formatDate } from '../utils/formatters';
+import { getWarehouseKpis, getWarehouseUtilizationKpis } from '../services/analyticsService';
+import { normalizeList } from '../utils/responseNormalizer';
+import { PageHeader } from '../components/common/PageHeader';
+import { Panel, PanelHead, PanelBody, Stat, StatGrid, Meter } from '../components/common/Panel';
+import { StatusBadge } from '../components/common/StatusBadge';
+import { formatCurrency, formatNumber, formatPercentage } from '../utils/formatters';
+import { pageStagger, riseIn, popIn } from '../utils/motion';
 
 export function WarehousesPage() {
-  const [search, setSearch] = useState('');
-  const [selectedWarehouse, setSelectedWarehouse] = useState(null);
-  const { page, limit, setPage, setLimit } = usePagination(1, 20);
+  const [data, setData] = useState({ warehouses: [], kpis: [], util: [] });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [selected, setSelected] = useState(null);
 
-  const { data: rawData, loading, refetch } = useApiQuery(
-    warehouseService.getWarehouses,
-    { page, limit, search },
-    { immediate: true }
-  );
-
-  const warehouses = useMemo(() => normalizeList(rawData), [rawData]);
-  const pagination = useMemo(() => normalizePagination(rawData, warehouses, page, limit), [rawData, warehouses, page, limit]);
-
-  const stats = useMemo(() => {
-    let activeWarehouses = 0;
-    let totalCapacity = 0;
-    let regions = new Set();
-
-    warehouses.forEach(w => {
-      if (w.status === 'active' || w.is_active !== false) activeWarehouses++;
-      totalCapacity += Number(w.max_capacity || 0);
-      if (w.country) regions.add(w.country);
-    });
-
-    return {
-      total: pagination.total || warehouses.length,
-      active: activeWarehouses,
-      regions: regions.size,
-      capacity: totalCapacity
-    };
-  }, [warehouses, pagination.total]);
-
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: {
-      opacity: 1,
-      transition: { staggerChildren: 0.05, delayChildren: 0.1 }
-    }
+  const load = () => {
+    setLoading(true);
+    setError(null);
+    Promise.all([warehouseService.getWarehouses(), getWarehouseKpis(), getWarehouseUtilizationKpis()])
+      .then(([w, k, u]) => {
+        setData({ warehouses: normalizeList(w), kpis: normalizeList(k), util: normalizeList(u) });
+        setLoading(false);
+      })
+      .catch((e) => { setError(e?.message || 'Facility services unavailable.'); setLoading(false); });
   };
+  useEffect(load, []);
 
-  const itemVariants = {
-    hidden: { opacity: 0, y: 8 },
-    visible: { opacity: 1, y: 0, transition: { duration: 0.4 } }
-  };
+  const merged = useMemo(() => data.warehouses.map((w) => {
+    const k = data.kpis.find((x) => x.warehouse_id === w.warehouse_id) || {};
+    const u = data.util.find((x) => x.warehouse_id === w.warehouse_id) || {};
+    return { ...w, ...k, utilization: u };
+  }), [data]);
 
-  const cardVariants = {
-    hidden: { opacity: 0, scale: 0.95 },
-    visible: { opacity: 1, scale: 1, transition: { duration: 0.3 } },
-    hover: { y: -4, transition: { duration: 0.2 } }
-  };
+  const totals = useMemo(() => merged.reduce((a, w) => {
+    a.units += Number(w.total_stock_units || 0);
+    a.value += Number(w.inventory_value || 0);
+    a.orders += Number(w.active_orders || 0);
+    a.capacity += Number(w.capacity_units || 0);
+    return a;
+  }, { units: 0, value: 0, orders: 0, capacity: 0 }), [merged]);
 
   return (
-    <motion.div
-      className="warehouses-page"
-      initial="hidden"
-      animate="visible"
-      variants={containerVariants}
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--space-6)',
-        minHeight: '100vh'
-      }}
-    >
-      {/* Premium Header */}
-      <motion.div variants={itemVariants}>
-        <div
-          style={{
-            background: 'linear-gradient(135deg, var(--color-bg-elevated) 0%, var(--color-bg-card) 100%)',
-            borderRadius: 'var(--radius-2xl)',
-            padding: 'var(--space-6)',
-            border: '1px solid var(--color-border-default)',
-            boxShadow: 'var(--shadow-card)',
-            position: 'relative',
-            overflow: 'hidden'
-          }}
-        >
-          <div
-            style={{
-              position: 'absolute',
-              top: '-30px',
-              right: '-30px',
-              width: '150px',
-              height: '150px',
-              background: 'radial-gradient(circle, rgba(59, 130, 246, 0.1) 0%, transparent 70%)',
-              borderRadius: '50%',
-              pointerEvents: 'none'
-            }}
-          />
-
-          <div style={{ position: 'relative', zIndex: 1 }}>
-            <div
-              style={{
-                fontSize: '11px',
-                fontWeight: 700,
-                textTransform: 'uppercase',
-                letterSpacing: '0.15em',
-                color: 'var(--color-accent-blue)',
-                marginBottom: 'var(--space-2)'
-              }}
-            >
-              FACILITIES MANAGEMENT
-            </div>
-            <h1
-              style={{
-                fontSize: 'var(--font-size-4xl)',
-                fontWeight: 800,
-                color: 'var(--color-text-primary)',
-                letterSpacing: '-0.02em',
-                marginBottom: 'var(--space-2)'
-              }}
-            >
-              Warehouse Network & Operations
-            </h1>
-            <p
-              style={{
-                fontSize: 'var(--font-size-sm)',
-                color: 'var(--color-text-secondary)',
-                maxWidth: '600px'
-              }}
-            >
-              Global warehouse locations, capacity metrics, operational staff, and facility management across all distribution centers
-            </p>
-          </div>
-        </div>
+    <motion.div className="page" variants={pageStagger} initial="hidden" animate="visible">
+      <motion.div variants={riseIn}>
+        <PageHeader
+          eyebrow="NETWORK / DISTRIBUTION CENTRES"
+          title="Warehouse network"
+          description="Physical capacity, occupied stock and demand load for every distribution centre in the network."
+          actions={<button className="btn btn-outline" onClick={load}><RefreshCw size={11} className={loading ? 'animate-spin' : ''} /> Refresh</button>}
+        />
       </motion.div>
 
-      {/* KPI Grid */}
-      <motion.div
-        variants={itemVariants}
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: 'var(--space-4)'
-        }}
-      >
-        {[
-          { label: 'Total Warehouses', value: stats.total, icon: Warehouse, color: 'var(--color-info-text)' },
-          { label: 'Active Facilities', value: stats.active, icon: Building2, color: 'var(--color-success-text)' },
-          { label: 'Geographic Regions', value: stats.regions, icon: Globe, color: 'var(--color-accent-blue)' },
-          { label: 'Total Capacity', value: formatNumber(stats.capacity), icon: Package, color: 'var(--color-warning-text)' }
-        ].map((kpi, idx) => (
-          <motion.div
-            key={idx}
-            whileHover={{ y: -2 }}
-            style={{
-              padding: 'var(--space-4)',
-              background: 'var(--color-bg-card)',
-              border: '1px solid var(--color-border-default)',
-              borderRadius: 'var(--radius-lg)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 'var(--space-2)',
-              position: 'relative',
-              overflow: 'hidden'
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <span
-                style={{
-                  fontSize: '10.5px',
-                  fontWeight: 700,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  color: 'var(--color-text-muted)'
-                }}
-              >
-                {kpi.label}
-              </span>
-              <kpi.icon size={16} style={{ color: kpi.color, opacity: 0.6 }} />
-            </div>
-            <div
-              style={{
-                fontSize: 'var(--font-size-2xl)',
-                fontWeight: 800,
-                color: kpi.color,
-                fontFamily: 'var(--font-mono)'
-              }}
-            >
-              {typeof kpi.value === 'number' ? formatNumber(kpi.value) : kpi.value}
-            </div>
-          </motion.div>
+      <motion.div variants={riseIn}>
+        <StatGrid cols={4}>
+          <Stat label="Facilities" value={formatNumber(merged.length)} meta="Active distribution centres" icon={Warehouse} />
+          <Stat label="Stock on hand" value={formatNumber(totals.units)} meta={`${formatNumber(totals.capacity)} unit capacity`} icon={Boxes} />
+          <Stat label="Inventory value" value={formatCurrency(totals.value)} meta="Valued at unit price" />
+          <Stat label="Active orders" value={formatNumber(totals.orders)} meta="Across all facilities" tone="accent" />
+        </StatGrid>
+      </motion.div>
+
+      {error && (
+        <Panel><PanelBody><div style={{ textAlign: 'center', padding: 20, color: 'var(--color-danger-text)', fontSize: 11 }}>{error}</div></PanelBody></Panel>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))', gap: 14 }}>
+        {loading && Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="skeleton" style={{ height: 210, borderRadius: 6 }} />
         ))}
-      </motion.div>
 
-      {/* Control Bar */}
-      <motion.div
-        variants={itemVariants}
-        style={{
-          display: 'flex',
-          gap: 'var(--space-3)',
-          alignItems: 'center',
-          justifyContent: 'space-between'
-        }}
-      >
-        <div style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center', maxWidth: '400px' }}>
-          <Search size={14} style={{ position: 'absolute', left: '0.75rem', color: 'var(--color-text-muted)' }} />
-          <input
-            type="text"
-            placeholder="Search by warehouse name, code, or location..."
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setPage(1);
-            }}
-            style={{
-              width: '100%',
-              paddingLeft: '2.2rem',
-              padding: '0.6rem 0.75rem',
-              backgroundColor: 'var(--color-bg-card)',
-              border: '1px solid var(--color-border-default)',
-              borderRadius: 'var(--radius-md)',
-              fontSize: 'var(--font-size-sm)',
-              color: 'var(--color-text-primary)'
-            }}
-          />
-        </div>
-
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          onClick={refetch}
-          style={{
-            padding: '0.6rem 1.2rem',
-            backgroundColor: 'rgba(59, 130, 246, 0.15)',
-            border: '1px solid var(--color-accent-blue)',
-            borderRadius: 'var(--radius-lg)',
-            color: 'var(--color-accent-blue)',
-            fontSize: 'var(--font-size-xs)',
-            fontWeight: 600,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            transition: 'all var(--transition-fast)'
-          }}
-        >
-          <RefreshCw size={14} />
-          Refresh
-        </motion.button>
-      </motion.div>
-
-      {/* Warehouses Grid */}
-      <motion.div
-        variants={itemVariants}
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-          gap: 'var(--space-4)',
-          flex: 1
-        }}
-      >
-        <AnimatePresence>
-          {loading ? (
-            <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: 'var(--space-8)', color: 'var(--color-text-muted)' }}>
-              Loading warehouses...
-            </div>
-          ) : warehouses.length === 0 ? (
-            <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: 'var(--space-8)', color: 'var(--color-text-muted)' }}>
-              No warehouses found
-            </div>
-          ) : (
-            warehouses.map((warehouse, idx) => (
-              <motion.div
-                key={warehouse.warehouse_id || idx}
-                variants={cardVariants}
-                whileHover="hover"
-                initial="hidden"
-                animate="visible"
-                exit={{ opacity: 0, scale: 0.95 }}
-                onClick={() => setSelectedWarehouse(warehouse)}
-                style={{
-                  padding: 'var(--space-4)',
-                  background: 'var(--color-bg-card)',
-                  border: '1px solid var(--color-border-default)',
-                  borderRadius: 'var(--radius-xl)',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 'var(--space-3)',
-                  transition: 'all var(--transition-fast)'
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <h3 style={{ fontSize: 'var(--font-size-lg)', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '0.25rem' }}>
-                      {warehouse.warehouse_name || 'Warehouse'}
-                    </h3>
-                    <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
-                      {warehouse.warehouse_code || 'N/A'}
-                    </span>
-                  </div>
-                  <span style={{
-                    padding: '0.25rem 0.6rem',
-                    backgroundColor: warehouse.status === 'active' || warehouse.is_active !== false ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                    color: warehouse.status === 'active' || warehouse.is_active !== false ? 'var(--color-success-text)' : 'var(--color-danger-text)',
-                    borderRadius: 'var(--radius-sm)',
-                    fontSize: '9px',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em'
-                  }}>
-                    {warehouse.status || 'Active'}
-                  </span>
-                </div>
-
-                {/* Location */}
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
-                  <MapPin size={14} style={{ color: 'var(--color-accent-blue)', marginTop: '0.15rem', flexShrink: 0 }} />
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
-                    <span>{warehouse.address || 'N/A'}</span>
-                    <span>{warehouse.city}, {warehouse.state} {warehouse.postal_code}</span>
-                    <span>{warehouse.country}</span>
-                  </div>
-                </div>
-
-                {/* Divider */}
-                <div style={{ height: '1px', backgroundColor: 'var(--color-border-subtle)' }} />
-
-                {/* Metrics Grid */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-2)' }}>
-                  <div style={{ backgroundColor: 'var(--color-bg-secondary)', padding: 'var(--space-2)', borderRadius: 'var(--radius-md)', textAlign: 'center' }}>
-                    <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: 600, marginBottom: '0.25rem' }}>Capacity</div>
-                    <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
-                      {formatNumber(warehouse.max_capacity || 0)}
-                    </div>
-                  </div>
-                  <div style={{ backgroundColor: 'var(--color-bg-secondary)', padding: 'var(--space-2)', borderRadius: 'var(--radius-md)', textAlign: 'center' }}>
-                    <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: 600, marginBottom: '0.25rem' }}>Staff</div>
-                    <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
-                      {formatNumber(warehouse.staff_count || 0)}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Contact */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-                  <Phone size={12} />
-                  <span>{warehouse.phone || 'N/A'}</span>
-                </div>
-              </motion.div>
-            ))
-          )}
-        </AnimatePresence>
-      </motion.div>
-
-      {/* Detail Panel */}
-      <AnimatePresence>
-        {selectedWarehouse && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setSelectedWarehouse(null)}
-            style={{
-              position: 'fixed',
-              inset: 0,
-              backgroundColor: 'rgba(0, 0, 0, 0.5)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'flex-end',
-              zIndex: 50
-            }}
-          >
-            <motion.div
-              initial={{ x: 500, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={{ x: 500, opacity: 0 }}
-              onClick={(e) => e.stopPropagation()}
-              style={{
-                width: '400px',
-                background: 'var(--color-bg-card)',
-                borderLeft: '1px solid var(--color-border-default)',
-                boxShadow: 'var(--shadow-card)',
-                display: 'flex',
-                flexDirection: 'column',
-                height: '100%',
-                maxHeight: '100%'
-              }}
+        {!loading && merged.map((w, i) => {
+          const util = Number(w.utilization?.utilization_percentage || 0);
+          const tone = util > 85 ? 'bad' : util > 65 ? 'warn' : 'good';
+          return (
+            <motion.button
+              key={w.warehouse_id}
+              onClick={() => setSelected(w)}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.05, duration: 0.3 }}
+              className="panel"
+              style={{ textAlign: 'left', padding: 0 }}
             >
-              <div style={{ padding: 'var(--space-4)', borderBottom: '1px solid var(--color-border-subtle)' }}>
-                <h3 style={{ fontSize: 'var(--font-size-lg)', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: 'var(--space-2)' }}>
-                  {selectedWarehouse.warehouse_name}
-                </h3>
-                <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-                  Code: {selectedWarehouse.warehouse_code}
-                </p>
+              <div className="panel-head" style={{ alignItems: 'flex-start' }}>
+                <div>
+                  <div className="mono" style={{ fontSize: 9, color: 'var(--color-accent)', letterSpacing: '0.08em' }}>{w.warehouse_code}</div>
+                  <h3 style={{ fontSize: 12.5, marginTop: 3 }}>{w.warehouse_name}</h3>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4, fontSize: 9.5, color: 'var(--color-text-muted)' }}>
+                    <MapPin size={9} /> {w.city}, {w.state} · {w.country}
+                  </div>
+                </div>
+                <StatusBadge status={w.status || 'ACTIVE'} size="sm" />
               </div>
+              <div style={{ padding: 14, display: 'grid', gap: 11 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                  <Figure label="Units" value={formatNumber(w.total_stock_units)} />
+                  <Figure label="Value" value={formatCurrency(w.inventory_value)} />
+                  <Figure label="Orders" value={formatNumber(w.active_orders)} />
+                </div>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+                    <span style={{ fontSize: 9.5, color: 'var(--color-text-muted)' }}>Occupied capacity</span>
+                    <span className="mono" style={{ fontSize: 9.5, color: 'var(--color-text-secondary)' }}>{formatPercentage(util)}</span>
+                  </div>
+                  <Meter value={util} tone={tone} />
+                  <div className="mono" style={{ fontSize: 8.5, color: 'var(--color-text-dim)', marginTop: 4 }}>
+                    {formatNumber(w.utilization?.occupied_stock_units || w.total_stock_units)} / {formatNumber(w.capacity_units)} units
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid var(--color-border-subtle)', paddingTop: 8 }}>
+                  <span style={{ fontSize: 9, color: 'var(--color-text-muted)' }}>{w.shipments_in_transit || 0} shipments in transit</span>
+                  <span style={{ fontSize: 9, color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: 3 }}>Inspect <ArrowUpRight size={9} /></span>
+                </div>
+              </div>
+            </motion.button>
+          );
+        })}
+      </div>
 
-              <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-                {[
-                  { label: 'Address', value: selectedWarehouse.address },
-                  { label: 'City', value: selectedWarehouse.city },
-                  { label: 'State', value: selectedWarehouse.state },
-                  { label: 'Country', value: selectedWarehouse.country },
-                  { label: 'Postal Code', value: selectedWarehouse.postal_code },
-                  { label: 'Capacity', value: formatNumber(selectedWarehouse.max_capacity || 0) },
-                  { label: 'Staff Count', value: formatNumber(selectedWarehouse.staff_count || 0) },
-                  { label: 'Phone', value: selectedWarehouse.phone },
-                  { label: 'Email', value: selectedWarehouse.email },
-                  { label: 'Manager', value: selectedWarehouse.manager_name }
-                ].map((row, idx) => (
-                  row.value && (
-                    <div key={idx} style={{
-                      padding: 'var(--space-3)',
-                      backgroundColor: 'var(--color-bg-secondary)',
-                      borderRadius: 'var(--radius-lg)',
-                      border: '1px solid var(--color-border-subtle)'
-                    }}>
-                      <span style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-muted)', display: 'block', marginBottom: '0.25rem' }}>
-                        {row.label}
-                      </span>
-                      <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-primary)' }}>
-                        {row.value}
-                      </span>
-                    </div>
-                  )
-                ))}
+      <AnimatePresence>
+        {selected && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 45, display: 'flex', justifyContent: 'flex-end' }}
+            onClick={() => setSelected(null)}
+          >
+            <motion.aside
+              variants={popIn} initial="hidden" animate="visible" exit="exit"
+              onClick={(e) => e.stopPropagation()}
+              style={{ width: 380, maxWidth: '100%', height: '100%', background: 'var(--color-bg-card)', borderLeft: '1px solid var(--color-border-default)', overflowY: 'auto' }}
+            >
+              <div className="panel-head">
+                <div>
+                  <div className="mono" style={{ fontSize: 9, color: 'var(--color-accent)' }}>{selected.warehouse_code}</div>
+                  <h3 style={{ fontSize: 13, marginTop: 2 }}>{selected.warehouse_name}</h3>
+                </div>
+                <button className="btn btn-ghost btn-icon" onClick={() => setSelected(null)}><X size={13} /></button>
               </div>
-
-              <div style={{ padding: 'var(--space-4)', borderTop: '1px solid var(--color-border-subtle)' }}>
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  onClick={() => setSelectedWarehouse(null)}
-                  style={{
-                    width: '100%',
-                    padding: '0.6rem',
-                    backgroundColor: 'var(--color-bg-secondary)',
-                    color: 'var(--color-text-primary)',
-                    border: '1px solid var(--color-border-default)',
-                    borderRadius: 'var(--radius-md)',
-                    fontWeight: 600,
-                    fontSize: 'var(--font-size-xs)',
-                    cursor: 'pointer'
-                  }}
-                >
-                  Close
-                </motion.button>
+              <div style={{ padding: 16, display: 'grid', gap: 10 }}>
+                <Detail label="Address" value={selected.address} />
+                <Detail label="City / state" value={`${selected.city}, ${selected.state}`} />
+                <Detail label="Country" value={selected.country} />
+                <Detail label="Status" value={selected.status} />
+                <Detail label="Capacity" value={`${formatNumber(selected.capacity_units)} units`} />
+                <Detail label="On hand" value={`${formatNumber(selected.total_stock_units)} units`} />
+                <Detail label="Reserved" value={`${formatNumber(selected.reserved_stock_units)} units`} />
+                <Detail label="Available" value={`${formatNumber(selected.available_stock_units)} units`} />
+                <Detail label="Inventory value" value={formatCurrency(selected.inventory_value)} />
+                <Detail label="Occupied locations" value={`${selected.utilization?.occupied_locations ?? '—'} of ${selected.utilization?.total_locations ?? '—'}`} />
+                <Detail label="Utilisation" value={formatPercentage(selected.utilization?.utilization_percentage || 0)} />
               </div>
-            </motion.div>
+            </motion.aside>
           </motion.div>
         )}
       </AnimatePresence>
     </motion.div>
+  );
+}
+
+function Figure({ label, value }) {
+  return (
+    <div>
+      <div className="eyebrow" style={{ fontSize: 8 }}>{label}</div>
+      <div className="mono truncate" style={{ fontSize: 10.5, marginTop: 3, color: 'var(--color-text-primary)' }}>{value}</div>
+    </div>
+  );
+}
+function Detail({ label, value }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, paddingBottom: 8, borderBottom: '1px solid var(--color-border-subtle)' }}>
+      <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>{label}</span>
+      <span style={{ fontSize: 10.5, color: 'var(--color-text-primary)', textAlign: 'right' }}>{value || '—'}</span>
+    </div>
   );
 }
 

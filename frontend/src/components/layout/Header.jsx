@@ -1,575 +1,333 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Menu,
-  Bell,
-  Search,
-  X,
-  ArrowRight,
-  AlertTriangle,
-  ShoppingCart,
-  Truck,
-  Layers,
-  Activity,
-  Boxes
+  Menu, Bell, Search, X, ArrowUpRight, AlertTriangle,
+  ShoppingCart, Truck, Command
 } from 'lucide-react';
-import { IconButton } from '../common/IconButton';
-import { Badge } from '../common/Badge';
+import { NAVIGATION_SECTIONS } from '../../routes/navigation';
 import { healthCheck, getDashboardMetrics } from '../../services/dashboardService';
 
-/**
- * Enterprise Application Top Navigation Header
- * Editorial, high-density, real telemetry beacon, instant jump search
- */
-export function Header({ onToggleSidebar, isSidebarOpen }) {
+const ALL_PAGES = NAVIGATION_SECTIONS.flatMap((s) =>
+  s.items.map((i) => ({ ...i, section: s.title }))
+);
+
+function humanize(path) {
+  return path
+    .replace(/^\//, '')
+    .split('-')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+export function Header({ onToggleSidebar }) {
   const navigate = useNavigate();
-  const [apiOnline, setApiOnline] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [isAlertsOpen, setIsAlertsOpen] = useState(false);
-  const [alertsData, setAlertsData] = useState({ lowStock: 0, pendingOrders: 0, inTransit: 0 });
-
-  const alertsRef = useRef(null);
+  const location = useLocation();
+  const [online, setOnline] = useState(true);
+  const [query, setQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [alertsOpen, setAlertsOpen] = useState(false);
+  const [alerts, setAlerts] = useState({ lowStock: 0, pending: 0, transit: 0 });
   const searchRef = useRef(null);
+  const alertsRef = useRef(null);
 
-  // Searchable navigation modules
-  const NAV_PAGES = [
-    { title: 'Control Tower Dashboard', path: '/dashboard', category: 'Overview' },
-    { title: 'Supply Chain Analytics', path: '/analytics', category: 'Overview' },
-    { title: 'Inventory Control', path: '/inventory', category: 'Inventory' },
-    { title: 'Sales Orders', path: '/orders', category: 'Operations' },
-    { title: 'Shipments & Tracking', path: '/shipments', category: 'Operations' },
-    { title: 'Stock Transfers', path: '/transfers', category: 'Operations' },
-    { title: 'Suppliers Directory', path: '/suppliers', category: 'Procurement' },
-    { title: 'Purchase Orders', path: '/purchase-orders', category: 'Procurement' },
-    { title: 'Goods Receipts', path: '/goods-receipts', category: 'Procurement' },
-    { title: 'Products & SKUs', path: '/products', category: 'Master Data' },
-    { title: 'Customers Directory', path: '/customers', category: 'Master Data' },
-    { title: 'Warehouses & Hubs', path: '/warehouses', category: 'Master Data' },
-    { title: 'Invoices & Billing', path: '/invoices', category: 'Finance' },
-    { title: 'Payment Journal', path: '/payments', category: 'Finance' },
-    { title: 'Returns & RMA', path: '/returns', category: 'Quality & Returns' }
-  ];
+  const current = ALL_PAGES.find((p) => p.path === location.pathname);
+  const section = current?.section || 'OPERATIONS';
+  const pageTitle = current?.title || humanize(location.pathname);
 
-  const filteredNav = searchQuery.trim()
-    ? NAV_PAGES.filter(
-        (p) =>
-          p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          p.category.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    : NAV_PAGES;
-
-  // Real Health & Alert Telemetry
   useEffect(() => {
-    let isMounted = true;
-    const fetchStatus = async () => {
+    let mounted = true;
+    const load = async () => {
       try {
         await healthCheck();
-        if (isMounted) setApiOnline(true);
+        if (mounted) setOnline(true);
       } catch {
-        if (isMounted) setApiOnline(false);
+        if (mounted) setOnline(false);
       }
-
       try {
-        const metricsRes = await getDashboardMetrics();
-        const data = metricsRes?.data || metricsRes;
-        if (isMounted && data) {
-          setAlertsData({
-            lowStock: data.lowStockItemsCount || (Array.isArray(data.lowStockItems) ? data.lowStockItems.length : 0),
-            pendingOrders: data.pendingOrdersCount || 0,
-            inTransit: data.inTransitShipmentsCount || 0
+        const res = await getDashboardMetrics();
+        const d = res?.data || res;
+        if (mounted && d) {
+          setAlerts({
+            lowStock: d.low_stock_locations || d.lowStockItemsCount || 0,
+            pending: d.pending_orders || d.pendingOrdersCount || 0,
+            transit: d.shipments_in_transit || d.inTransitShipmentsCount || 0
           });
         }
       } catch {
-        // Fallback silently if metrics fail
+        /* Telemetry is optional; keep the last known values. */
       }
     };
-
-    fetchStatus();
-    const interval = setInterval(fetchStatus, 30000);
+    load();
+    const t = setInterval(load, 30000);
     return () => {
-      isMounted = false;
-      clearInterval(interval);
+      mounted = false;
+      clearInterval(t);
     };
   }, []);
 
-  // Keyboard shortcut '/' to open search
   useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === '/' && !isSearchOpen && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+    const onKey = (e) => {
+      const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
+      if (e.key === '/' && !typing) {
         e.preventDefault();
-        setIsSearchOpen(true);
+        setSearchOpen(true);
+        setTimeout(() => searchRef.current?.querySelector('input')?.focus(), 30);
+      }
+      if (e.key === 'Escape') {
+        setSearchOpen(false);
+        setAlertsOpen(false);
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSearchOpen]);
-
-  // Click outside handler
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (alertsRef.current && !alertsRef.current.contains(e.target)) {
-        setIsAlertsOpen(false);
-      }
-      if (searchRef.current && !searchRef.current.contains(e.target)) {
-        setIsSearchOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const totalAlertCount = alertsData.lowStock + alertsData.pendingOrders + alertsData.inTransit;
+  useEffect(() => {
+    const onClick = (e) => {
+      if (searchRef.current && !searchRef.current.contains(e.target)) setSearchOpen(false);
+      if (alertsRef.current && !alertsRef.current.contains(e.target)) setAlertsOpen(false);
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, []);
+
+  const results = ALL_PAGES.filter(
+    (p) =>
+      !query.trim() ||
+      p.title.toLowerCase().includes(query.toLowerCase()) ||
+      p.section.toLowerCase().includes(query.toLowerCase())
+  );
+  const totalAlerts = alerts.lowStock + alerts.pending + alerts.transit;
 
   return (
-    <header
-      style={{
-        height: 'var(--header-height)',
-        backgroundColor: 'var(--glass-bg)',
-        borderBottom: '1px solid var(--color-border-subtle)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '0 var(--space-5)',
-        position: 'sticky',
-        top: 0,
-        zIndex: 'var(--z-header)',
-        backdropFilter: 'var(--glass-blur)',
-        transition: 'all var(--transition-normal)'
-      }}
-      className="app-header"
-    >
-      {/* Left: Brand Identity & Sidebar Toggle */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+    <header className="app-header">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
         <button
+          className="btn btn-ghost btn-icon"
           onClick={onToggleSidebar}
-          style={{
-            background: 'transparent',
-            border: 'none',
-            color: 'var(--color-text-secondary)',
-            cursor: 'pointer',
-            padding: '0.4rem',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: 'var(--radius-md)',
-            transition: 'background var(--transition-fast), color var(--transition-fast)'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
-            e.currentTarget.style.color = 'var(--color-text-primary)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = 'transparent';
-            e.currentTarget.style.color = 'var(--color-text-secondary)';
-          }}
-          title={isSidebarOpen ? 'Collapse Sidebar' : 'Expand Sidebar'}
+          aria-label="Toggle navigation"
         >
-          <Menu size={18} />
+          <Menu size={16} />
         </button>
 
-        <div
+        <button
           onClick={() => navigate('/dashboard')}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.75rem',
-            cursor: 'pointer',
-            userSelect: 'none'
-          }}
+          style={{ display: 'flex', alignItems: 'center', gap: 9 }}
+          aria-label="Control Tower home"
         >
-          <div
-            style={{
-              width: '28px',
-              height: '28px',
-              borderRadius: 'var(--radius-sm)',
-              backgroundColor: 'var(--color-text-primary)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'var(--color-bg-primary)',
-              fontWeight: 800,
-              fontSize: '13px',
-              letterSpacing: '-0.03em'
-            }}
-          >
-            CT
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <span
-              style={{
-                fontWeight: 600,
-                fontSize: 'var(--font-size-sm)',
-                color: 'var(--color-text-primary)',
-                letterSpacing: '-0.02em',
-                lineHeight: 1.1
-              }}
-            >
-              Control Tower
+          <span className="brand-mark">CT</span>
+          <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.1 }}>
+            <span style={{ fontSize: 12.5, fontWeight: 620, letterSpacing: '-0.02em' }}>Control Tower</span>
+            <span style={{ fontSize: 8.5, letterSpacing: '0.13em', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>
+              Supply Chain
             </span>
-            <span
-              style={{
-                fontSize: '10px',
-                color: 'var(--color-text-muted)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.08em',
-                fontWeight: 600
-              }}
-            >
-              Enterprise Supply Chain
-            </span>
-          </div>
+          </span>
+        </button>
+
+        <div className="context-crumb" style={{ marginLeft: 6 }}>
+          <span className="sep">/</span>
+          <span>{section.toLowerCase()}</span>
+          <span className="sep">/</span>
+          <strong>{pageTitle}</strong>
         </div>
       </div>
 
-      {/* Center: Global Module Jump Search */}
-      <div ref={searchRef} style={{ position: 'relative', width: '380px', maxWidth: '100%' }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            backgroundColor: 'var(--color-bg-input)',
-            border: `1px solid ${isSearchOpen ? 'var(--color-border-strong)' : 'var(--color-border-default)'}`,
-            borderRadius: 'var(--radius-md)',
-            padding: '0.35rem 0.65rem',
-            gap: '0.5rem',
-            transition: 'all var(--transition-fast)',
-            boxShadow: isSearchOpen ? 'var(--shadow-glow)' : 'none'
-          }}
-        >
-          <Search size={14} style={{ color: 'var(--color-text-muted)' }} />
+      <div ref={searchRef} style={{ position: 'relative' }}>
+        <div className="header-search" onClick={() => setSearchOpen(true)}>
+          <Search size={13} />
           <input
-            type="text"
-            placeholder="Search modules or press '/'..."
-            value={searchQuery}
+            value={query}
             onChange={(e) => {
-              setSearchQuery(e.target.value);
-              setIsSearchOpen(true);
+              setQuery(e.target.value);
+              setSearchOpen(true);
             }}
-            onFocus={() => setIsSearchOpen(true)}
-            style={{
-              backgroundColor: 'transparent',
-              border: 'none',
-              outline: 'none',
-              color: 'var(--color-text-primary)',
-              fontSize: 'var(--font-size-xs)',
-              width: '100%',
-              padding: 0
-            }}
+            onFocus={() => setSearchOpen(true)}
+            placeholder="Jump to module"
+            aria-label="Search modules"
           />
-          {searchQuery ? (
-            <button
-              onClick={() => {
-                setSearchQuery('');
-                setIsSearchOpen(false);
-              }}
-              style={{ color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center' }}
-            >
-              <X size={12} />
-            </button>
-          ) : (
-            <kbd
-              style={{
-                fontSize: '10px',
-                padding: '0.1rem 0.35rem',
-                borderRadius: 'var(--radius-xs)',
-                backgroundColor: 'var(--color-bg-elevated)',
-                border: '1px solid var(--color-border-default)',
-                color: 'var(--color-text-muted)',
-                fontFamily: 'var(--font-mono)'
-              }}
-            >
-              /
-            </kbd>
-          )}
+          <kbd>/</kbd>
         </div>
 
-        {/* Quick Jump Search Flyout */}
-        {isSearchOpen && (
-          <div
-            style={{
-              position: 'absolute',
-              top: 'calc(100% + 6px)',
-              left: 0,
-              right: 0,
-              backgroundColor: 'var(--glass-bg)',
-              backdropFilter: 'var(--glass-blur)',
-              border: '1px solid var(--color-border-strong)',
-              borderRadius: 'var(--radius-lg)',
-              boxShadow: 'var(--shadow-lg)',
-              maxHeight: '320px',
-              overflowY: 'auto',
-              zIndex: 'var(--z-modal)',
-              padding: '0.35rem',
-              animation: 'fadeInUp 0.2s var(--ease-out-expo)'
-            }}
-          >
-            <div
-              style={{
-                fontSize: '10px',
-                color: 'var(--color-text-dim)',
-                padding: '0.35rem 0.5rem',
-                fontWeight: 700,
-                textTransform: 'uppercase',
-                letterSpacing: '0.08em'
-              }}
-            >
-              Navigation Jump
-            </div>
-            {filteredNav.map((page) => (
-              <div
-                key={page.path}
-                onClick={() => {
-                  navigate(page.path);
-                  setIsSearchOpen(false);
-                  setSearchQuery('');
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '0.45rem 0.65rem',
-                  borderRadius: 'var(--radius-md)',
-                  cursor: 'pointer',
-                  fontSize: 'var(--font-size-xs)',
-                  color: 'var(--color-text-primary)',
-                  transition: 'background var(--transition-fast)'
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)')}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-              >
-                <span style={{ fontWeight: 500 }}>{page.title}</span>
-                <span style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>{page.category}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Right: Live Beacon, Alerts Popover, User Capsule */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-        {/* Real API Status Beacon */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.45rem',
-            padding: '0.2rem 0.55rem',
-            borderRadius: 'var(--radius-full)',
-            backgroundColor: apiOnline ? 'var(--color-success-bg)' : 'var(--color-danger-bg)',
-            border: `1px solid ${apiOnline ? 'var(--color-success-border)' : 'var(--color-danger-border)'}`,
-            fontSize: '11px',
-            color: apiOnline ? 'var(--color-success-text)' : 'var(--color-danger-text)'
-          }}
-          title={apiOnline ? 'Live Express Backend Connected' : 'Live Express Backend Offline'}
-        >
-          <span
-            style={{
-              width: '6px',
-              height: '6px',
-              borderRadius: '50%',
-              backgroundColor: apiOnline ? 'var(--color-success)' : 'var(--color-danger)'
-            }}
-            className={apiOnline ? 'animate-pulse' : ''}
-          />
-          <span style={{ fontWeight: 600, letterSpacing: '0.04em' }}>{apiOnline ? 'LIVE' : 'OFFLINE'}</span>
-        </div>
-
-        {/* Operational Alerts Popover */}
-        <div ref={alertsRef} style={{ position: 'relative' }}>
-          <IconButton
-            icon={Bell}
-            size="sm"
-            variant={isAlertsOpen ? 'secondary' : 'ghost'}
-            title="Operational Alerts"
-            badge={totalAlertCount > 0 ? String(totalAlertCount) : undefined}
-            onClick={() => setIsAlertsOpen((prev) => !prev)}
-          />
-
-          {isAlertsOpen && (
-            <div
+        <AnimatePresence>
+          {searchOpen && (
+            <motion.div
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.16 }}
               style={{
                 position: 'absolute',
-                top: 'calc(100% + 8px)',
+                top: 'calc(100% + 6px)',
                 right: 0,
-                width: '320px',
-                backgroundColor: 'var(--glass-bg)',
-                backdropFilter: 'var(--glass-blur)',
-                border: '1px solid var(--color-border-strong)',
+                width: 330,
+                background: '#101415',
+                border: '1px solid var(--color-border-default)',
                 borderRadius: 'var(--radius-lg)',
                 boxShadow: 'var(--shadow-lg)',
-                zIndex: 'var(--z-modal)',
                 overflow: 'hidden',
-                animation: 'fadeInUp 0.2s var(--ease-out-expo)'
+                zIndex: 60
               }}
             >
-              <div
-                style={{
-                  padding: '0.65rem 0.85rem',
-                  borderBottom: '1px solid var(--color-border-subtle)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  backgroundColor: 'var(--color-bg-tertiary)'
-                }}
-              >
-                <span style={{ fontWeight: 600, fontSize: 'var(--font-size-xs)', color: 'var(--color-text-primary)' }}>
-                  Operational Telemetry Alerts
-                </span>
-                <span
-                  style={{
-                    fontSize: '10px',
-                    fontWeight: 700,
-                    color: totalAlertCount > 0 ? 'var(--color-warning-text)' : 'var(--color-success-text)'
-                  }}
-                >
-                  {totalAlertCount} Active
-                </span>
+              <div className="eyebrow" style={{ padding: '9px 11px 5px' }}>
+                {query ? 'Matching modules' : 'All modules'}
               </div>
-
-              <div style={{ padding: '0.4rem', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-                {alertsData.lowStock > 0 && (
-                  <div
-                    onClick={() => {
-                      navigate('/inventory');
-                      setIsAlertsOpen(false);
-                    }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.65rem',
-                      padding: '0.55rem 0.65rem',
-                      backgroundColor: 'var(--color-danger-bg)',
-                      borderRadius: 'var(--radius-md)',
-                      border: '1px solid var(--color-danger-border)',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <AlertTriangle size={14} style={{ color: 'var(--color-danger-text)', flexShrink: 0 }} />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-                        Low Stock Alert
-                      </div>
-                      <div style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>
-                        {alertsData.lowStock} item(s) below reorder threshold
-                      </div>
-                    </div>
-                    <ArrowRight size={12} style={{ color: 'var(--color-text-muted)' }} />
-                  </div>
-                )}
-
-                {alertsData.pendingOrders > 0 && (
-                  <div
-                    onClick={() => {
-                      navigate('/orders');
-                      setIsAlertsOpen(false);
-                    }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.65rem',
-                      padding: '0.55rem 0.65rem',
-                      backgroundColor: 'var(--color-warning-bg)',
-                      borderRadius: 'var(--radius-md)',
-                      border: '1px solid var(--color-warning-border)',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <ShoppingCart size={14} style={{ color: 'var(--color-warning-text)', flexShrink: 0 }} />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-                        Pending Fulfillment
-                      </div>
-                      <div style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>
-                        {alertsData.pendingOrders} sales orders awaiting action
-                      </div>
-                    </div>
-                    <ArrowRight size={12} style={{ color: 'var(--color-text-muted)' }} />
-                  </div>
-                )}
-
-                {alertsData.inTransit > 0 && (
-                  <div
-                    onClick={() => {
-                      navigate('/shipments');
-                      setIsAlertsOpen(false);
-                    }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.65rem',
-                      padding: '0.55rem 0.65rem',
-                      backgroundColor: 'var(--color-info-bg)',
-                      borderRadius: 'var(--radius-md)',
-                      border: '1px solid var(--color-info-border)',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <Truck size={14} style={{ color: 'var(--color-info-text)', flexShrink: 0 }} />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-                        Active Freight
-                      </div>
-                      <div style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>
-                        {alertsData.inTransit} carrier shipments in transit
-                      </div>
-                    </div>
-                    <ArrowRight size={12} style={{ color: 'var(--color-text-muted)' }} />
-                  </div>
-                )}
-
-                {totalAlertCount === 0 && (
-                  <div
-                    style={{
-                      padding: '1rem',
-                      textAlign: 'center',
-                      color: 'var(--color-text-muted)',
-                      fontSize: '11px'
-                    }}
-                  >
-                    All systems nominal. No active operational alerts.
+              <div style={{ maxHeight: 300, overflowY: 'auto', padding: '0 5px 5px' }}>
+                {results.map((p) => {
+                  const Icon = p.icon;
+                  return (
+                    <button
+                      key={p.path}
+                      onClick={() => {
+                        navigate(p.path);
+                        setSearchOpen(false);
+                        setQuery('');
+                      }}
+                      style={{
+                        width: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 9,
+                        padding: '7px 8px',
+                        borderRadius: 4,
+                        textAlign: 'left'
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-bg-hover)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                    >
+                      <Icon size={13} style={{ color: 'var(--color-text-muted)' }} />
+                      <span style={{ flex: 1, fontSize: 11.5, color: 'var(--color-text-primary)' }}>{p.title}</span>
+                      <span style={{ fontSize: 9, color: 'var(--color-text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                        {p.section.split(' ')[0]}
+                      </span>
+                    </button>
+                  );
+                })}
+                {results.length === 0 && (
+                  <div style={{ padding: 16, fontSize: 11, color: 'var(--color-text-muted)', textAlign: 'center' }}>
+                    No module matches “{query}”.
                   </div>
                 )}
               </div>
-            </div>
+              <div style={{ borderTop: '1px solid var(--color-border-subtle)', padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 5, fontSize: 9, color: 'var(--color-text-dim)' }}>
+                <Command size={10} /> search &nbsp;·&nbsp; ESC close
+              </div>
+            </motion.div>
           )}
+        </AnimatePresence>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div className={`status-beacon${online ? '' : ' offline'}`} title={online ? 'Backend telemetry connected' : 'Backend unreachable'}>
+          <span className={`dot${online ? ' animate-pulse' : ''}`} />
+          {online ? 'LIVE' : 'OFFLINE'}
         </div>
 
-        {/* User / Profile Capsule */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            padding: '0.2rem 0.5rem 0.2rem 0.25rem',
-            backgroundColor: 'var(--color-bg-tertiary)',
-            border: '1px solid var(--color-border-default)',
-            borderRadius: 'var(--radius-full)'
-          }}
-        >
-          <div
-            style={{
-              width: '24px',
-              height: '24px',
-              borderRadius: '50%',
-              backgroundColor: 'var(--color-bg-hover)',
-              border: '1px solid var(--color-border-strong)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'var(--color-text-primary)',
-              fontSize: '10px',
-              fontWeight: 700
-            }}
+        <div ref={alertsRef} style={{ position: 'relative' }}>
+          <button
+            className="btn btn-ghost btn-icon"
+            onClick={() => setAlertsOpen((v) => !v)}
+            aria-label={`Operational alerts, ${totalAlerts} active`}
+            style={{ position: 'relative' }}
           >
-            OP
+            <Bell size={15} />
+            {totalAlerts > 0 && (
+              <span style={{
+                position: 'absolute', top: 3, right: 3, width: 5, height: 5,
+                borderRadius: '50%', background: 'var(--color-warning)'
+              }} />
+            )}
+          </button>
+
+          <AnimatePresence>
+            {alertsOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.16 }}
+                style={{
+                  position: 'absolute', top: 'calc(100% + 7px)', right: 0, width: 326,
+                  background: '#101415', border: '1px solid var(--color-border-default)',
+                  borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-lg)',
+                  overflow: 'hidden', zIndex: 60
+                }}
+              >
+                <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--color-border-subtle)', display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 11, fontWeight: 600 }}>Operational alerts</span>
+                  <span className="mono" style={{ fontSize: 10, color: totalAlerts ? 'var(--color-warning-text)' : 'var(--color-success-text)' }}>
+                    {totalAlerts} ACTIVE
+                  </span>
+                </div>
+                <div style={{ padding: 6 }}>
+                  <AlertRow
+                    icon={AlertTriangle}
+                    tone="danger"
+                    show={alerts.lowStock > 0}
+                    title="Stock below threshold"
+                    detail={`${alerts.lowStock} location${alerts.lowStock === 1 ? '' : 's'} need attention`}
+                    onClick={() => { navigate('/inventory'); setAlertsOpen(false); }}
+                  />
+                  <AlertRow
+                    icon={ShoppingCart}
+                    tone="warning"
+                    show={alerts.pending > 0}
+                    title="Orders awaiting action"
+                    detail={`${alerts.pending} sales order${alerts.pending === 1 ? '' : 's'} in the pipeline`}
+                    onClick={() => { navigate('/orders'); setAlertsOpen(false); }}
+                  />
+                  <AlertRow
+                    icon={Truck}
+                    tone="info"
+                    show={alerts.transit > 0}
+                    title="Freight in motion"
+                    detail={`${alerts.transit} shipment${alerts.transit === 1 ? '' : 's'} in transit`}
+                    onClick={() => { navigate('/shipments'); setAlertsOpen(false); }}
+                  />
+                  {totalAlerts === 0 && (
+                    <div style={{ padding: 18, textAlign: 'center', fontSize: 10.5, color: 'var(--color-text-muted)' }}>
+                      All monitored thresholds are nominal.
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        <div className="profile-capsule">
+          <span className="avatar">OP</span>
+          <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.15 }}>
+            <span style={{ fontSize: 10.5, fontWeight: 600 }}>Operations</span>
+            <span style={{ fontSize: 8.5, color: 'var(--color-text-muted)', letterSpacing: '0.06em' }}>GLOBAL ADMIN</span>
           </div>
-          <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-            Operations
-          </span>
         </div>
       </div>
     </header>
+  );
+}
+
+function AlertRow({ icon: Icon, tone, show, title, detail, onClick }) {
+  if (!show) return null;
+  const color = `var(--color-${tone}-text)`;
+  const bg = `var(--color-${tone}-bg)`;
+  const border = `var(--color-${tone}-border)`;
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        width: '100%', display: 'flex', alignItems: 'center', gap: 9,
+        padding: '8px 9px', marginBottom: 4, textAlign: 'left',
+        background: bg, border: `1px solid ${border}`, borderRadius: 4
+      }}
+    >
+      <Icon size={13} style={{ color }} />
+      <span style={{ flex: 1 }}>
+        <span style={{ display: 'block', fontSize: 10.5, fontWeight: 600, color: 'var(--color-text-primary)' }}>{title}</span>
+        <span style={{ display: 'block', fontSize: 9.5, color: 'var(--color-text-muted)' }}>{detail}</span>
+      </span>
+      <ArrowUpRight size={11} style={{ color: 'var(--color-text-muted)' }} />
+    </button>
   );
 }
 

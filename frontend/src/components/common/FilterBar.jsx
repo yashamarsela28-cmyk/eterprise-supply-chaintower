@@ -1,57 +1,43 @@
 import React from 'react';
-import SearchInput from './SearchInput';
-import Button from './Button';
-import { RotateCcw } from 'lucide-react';
+import { Search, X, RotateCcw } from 'lucide-react';
 
 /**
- * Enterprise Filter Bar for table lists
+ * Inline list toolbar: search, filters, reset.
  */
 export function FilterBar({
   search = '',
   onSearchChange,
-  searchPlaceholder = 'Search records...',
-  children, // Additional filters (selects, datepickers, buttons)
+  searchPlaceholder = 'Search records…',
+  children,
   onReset,
   hasActiveFilters = false,
   className = ''
 }) {
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        flexWrap: 'wrap',
-        gap: 'var(--space-3)',
-        padding: 'var(--space-4)',
-        backgroundColor: 'var(--color-bg-card)',
-        border: '1px solid var(--color-border-subtle)',
-        borderRadius: 'var(--radius-xl)',
-        marginBottom: 'var(--space-4)'
-      }}
-      className={`filter-bar ${className}`}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-3)', flex: 1 }}>
+    <div className={`toolbar ${className}`}>
+      <div className="toolbar-group">
         {onSearchChange && (
-          <SearchInput
-            value={search}
-            onChange={(e) => onSearchChange(e.target.value)}
-            placeholder={searchPlaceholder}
-          />
+          <label className="search-field">
+            <Search size={12} />
+            <input
+              value={search}
+              onChange={(e) => onSearchChange(e.target.value)}
+              placeholder={searchPlaceholder}
+              aria-label={searchPlaceholder}
+            />
+            {search && (
+              <button onClick={() => onSearchChange('')} aria-label="Clear search" style={{ display: 'flex', color: 'var(--color-text-muted)' }}>
+                <X size={11} />
+              </button>
+            )}
+          </label>
         )}
         {children}
       </div>
-
       {onReset && hasActiveFilters && (
-        <Button
-          variant="ghost"
-          size="sm"
-          icon={RotateCcw}
-          onClick={onReset}
-          title="Reset all filters"
-        >
-          Reset Filters
-        </Button>
+        <button className="btn btn-ghost" onClick={onReset}>
+          <RotateCcw size={11} /> Reset
+        </button>
       )}
     </div>
   );

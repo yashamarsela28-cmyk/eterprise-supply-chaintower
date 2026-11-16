@@ -5,6 +5,7 @@ import apiClient from './apiClient';
  * Supports fetching, creating, updating shipment status, and dispatching waypoints.
  */
 export const getShipments = (params) => apiClient.get('/shipments', params);
+export const getShipmentMapData = (params) => apiClient.get('/shipments/map-data', params);
 export const getShipmentById = (shipmentId) => apiClient.get(`/shipments/${shipmentId}`);
 export const getShipmentTracking = (shipmentId) => apiClient.get(`/shipments/${shipmentId}/tracking`);
 export const createShipment = (shipmentData) => apiClient.post('/shipments', shipmentData);
@@ -13,6 +14,7 @@ export const addShipmentTracking = (shipmentId, trackingData) => apiClient.post(
 
 export const shipmentService = {
   getShipments,
+  getShipmentMapData,
   getShipmentById,
   getShipmentTracking,
   createShipment,

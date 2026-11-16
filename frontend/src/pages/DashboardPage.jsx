@@ -1,834 +1,363 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  Boxes,
-  ShoppingCart,
-  Truck,
-  AlertTriangle,
-  TrendingUp,
-  DollarSign,
-  RefreshCw,
-  ArrowRight,
-  Warehouse,
-  FileSpreadsheet,
-  Activity,
-  ShieldCheck
+  RefreshCw, ArrowUpRight, AlertTriangle, TrendingUp, Truck,
+  ShoppingCart, Boxes, Warehouse, Receipt, RotateCcw, Activity,
+  CircleDollarSign, Radio
 } from 'lucide-react';
-import { useApiQuery } from '../hooks/useApiQuery';
 import { getDashboardMetrics } from '../services/dashboardService';
-import {
-  getSupplyChainScorecard,
-  getWarehouseKpis,
-  getWarehouseUtilizationKpis
-} from '../services/analyticsService';
-import { normalizeObject, normalizeList } from '../utils/responseNormalizer';
+import { getSupplyChainScorecard, getWarehouseKpis, getWarehouseUtilizationKpis, getSupplyChainRiskKpis } from '../services/analyticsService';
+import { getOrders } from '../services/orderService';
+import { getShipments } from '../services/shipmentService';
+import { normalizeList, normalizeObject } from '../utils/responseNormalizer';
 import { PageHeader } from '../components/common/PageHeader';
-import { KpiCard } from '../components/common/KpiCard';
-import { Card } from '../components/common/Card';
-import { Button } from '../components/common/Button';
+import { Panel, PanelHead, PanelBody, Stat, StatGrid, Meter } from '../components/common/Panel';
 import { StatusBadge } from '../components/common/StatusBadge';
 import { LoadingState } from '../components/common/LoadingState';
 import { ErrorState } from '../components/common/ErrorState';
-import { ProgressBar } from '../components/common/ProgressBar';
-import { BarChart } from '../components/common/BarChart';
-import { formatCurrency, formatNumber, formatDate, formatPercentage } from '../utils/formatters';
+import { formatCurrency, formatDate, formatNumber, formatPercentage } from '../utils/formatters';
+import { pageStagger, riseIn, EASE } from '../utils/motion';
 
-/**
- * Enterprise Executive Control Tower Dashboard
- * High-density editorial command interface with live multi-echelon telemetry
- */
 export function DashboardPage() {
   const navigate = useNavigate();
+  const [state, setState] = useState({ loading: true, error: null });
+  const [refreshing, setRefreshing] = useState(false);
 
-  // Load Operational Metrics
-  const { data: metricsRaw, loading: metricsLoading, error: metricsError, refetch: refetchMetrics } = useApiQuery(
-    getDashboardMetrics,
-    {},
-    { immediate: true }
-  );
-
-  // Load Analytics Scorecard
-  const { data: scorecardRaw, loading: scoreLoading, refetch: refetchScore } = useApiQuery(
-    getSupplyChainScorecard,
-    {},
-    { immediate: true }
-  );
-
-  // Load Warehouse KPIs for valuation chart
-  const { data: whKpisRaw, loading: whLoading, refetch: refetchWh } = useApiQuery(
-    getWarehouseKpis,
-    {},
-    { immediate: true }
-  );
-
-  // Load Warehouse Utilization for capacity telemetry
-  const { data: whUtilRaw, loading: utilLoading, refetch: refetchUtil } = useApiQuery(
-    getWarehouseUtilizationKpis,
-    {},
-    { immediate: true }
-  );
-
-  const handleRefreshAll = () => {
-    refetchMetrics();
-    refetchScore();
-    refetchWh();
-    refetchUtil();
-  };
-
-  // Defensive Normalization: Always extracts valid object/array regardless of wrapper depth
-  const metrics = normalizeObject(metricsRaw);
-  const scorecard = normalizeObject(scorecardRaw);
-  const warehouseKpis = normalizeList(whKpisRaw);
-  const warehouseUtil = normalizeList(whUtilRaw);
-
-  if (metricsLoading && scoreLoading && !metricsRaw && !scorecardRaw) {
-    return <LoadingState message="Connecting to Supply Chain Control Tower..." fullPage />;
-  }
-
-  if (metricsError && !metricsRaw) {
-    return (
-      <ErrorState
-        title="Failed to Load Control Tower"
-        message={metricsError?.message || 'Could not connect to Control Tower backend services.'}
-        onRetry={handleRefreshAll}
-      />
-    );
-  }
-
-  // Transform warehouse KPIs for bar chart
-  const whChartData = warehouseKpis.map((w) => ({
-    label: w.warehouse_name || w.warehouse_code || 'Facility',
-    value: Number(w.total_inventory_value) || 0
-  }));
-
-  const recentOrders = Array.isArray(metrics.recentOrders) ? metrics.recentOrders : [];
-  const lowStockItems = Array.isArray(metrics.lowStockItems) ? metrics.lowStockItems : [];
-
-  // Animation Variants
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.08,
-        delayChildren: 0.1
-      }
+  const load = async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true);
+    else setState((s) => ({ ...s, loading: true, error: null }));
+    try {
+      const [m, sc, wh, util, risk, orders, shipments] = await Promise.all([
+        getDashboardMetrics(),
+        getSupplyChainScorecard(),
+        getWarehouseKpis(),
+        getWarehouseUtilizationKpis(),
+        getSupplyChainRiskKpis(),
+        getOrders({ limit: 6 }),
+        getShipments({ limit: 5 })
+      ]);
+      setState({
+        loading: false,
+        error: null,
+        metrics: normalizeObject(m),
+        scorecard: normalizeObject(sc),
+        warehouses: normalizeList(wh),
+        utilization: normalizeList(util),
+        risk: normalizeList(risk),
+        orders: normalizeList(orders),
+        shipments: normalizeList(shipments)
+      });
+    } catch (err) {
+      setState({ loading: false, error: err?.message || 'Control Tower telemetry is unavailable.' });
+    } finally {
+      setRefreshing(false);
     }
   };
 
-  const itemVariants = {
-    hidden: { opacity: 0, y: 20 },
-    visible: {
-      opacity: 1,
-      y: 0,
-      transition: {
-        duration: 0.5,
-        ease: [0.19, 1, 0.22, 1]
-      }
-    }
-  };
+  useEffect(() => { load(); }, []);
+
+  const { metrics = {}, scorecard = {}, warehouses = [], utilization = [], risk = [], orders = [], shipments = [] } = state;
+
+  const valuation = useMemo(
+    () => warehouses.reduce((sum, w) => sum + Number(w.inventory_value || 0), 0),
+    [warehouses]
+  );
+  const units = useMemo(
+    () => warehouses.reduce((sum, w) => sum + Number(w.total_stock_units || 0), 0),
+    [warehouses]
+  );
+
+  if (state.loading) return <LoadingState message="Connecting to network telemetry…" fullPage />;
+  if (state.error) {
+    return <ErrorState title="Control Tower unavailable" message={state.error} onRetry={() => load()} />;
+  }
+
+  const pipeline = [
+    { key: 'Pending', value: metrics.pending_orders || 0, tone: 'var(--color-warning)' },
+    { key: 'Processing', value: metrics.processing_orders || 0, tone: 'var(--color-accent-blue)' },
+    { key: 'Shipped', value: metrics.shipped_orders || 0, tone: 'var(--color-info)' },
+    { key: 'Delivered', value: metrics.delivered_orders || 0, tone: 'var(--color-success)' }
+  ];
+  const pipelineTotal = pipeline.reduce((s, p) => s + p.value, 0) || 1;
+
+  const riskRows = risk.filter((r) => ['PENDING_SALES_ORDERS', 'OPEN_CUSTOMER_RECEIVABLES', 'OVERDUE_INVOICES', 'PARTIAL_PURCHASE_ORDERS', 'LOW_STOCK'].includes(r.risk_type));
 
   return (
-    <motion.div
-      className="dashboard-page"
-      initial="hidden"
-      animate="visible"
-      variants={containerVariants}
+    <motion.div className="page" variants={pageStagger} initial="hidden" animate="visible">
+      <motion.div variants={riseIn}>
+        <PageHeader
+          eyebrow="CONTROL TOWER / NETWORK STATUS"
+          title="Supply chain, in one picture"
+          description="A live read of demand, stock, freight and cash across the distribution network. Every figure is committed PostgreSQL data."
+          badge={
+            <span className="badge badge-success">
+              <span className="dot" />
+              <span>Live</span>
+            </span>
+          }
+          actions={
+            <>
+              <span className="mono" style={{ fontSize: 9.5, color: 'var(--color-text-muted)', marginRight: 4 }}>
+                SNAPSHOT {formatDate(metrics.snapshot_date)}
+              </span>
+              <button className="btn btn-outline" onClick={() => load(true)}>
+                <RefreshCw size={11} className={refreshing ? 'animate-spin' : ''} />
+                Refresh
+              </button>
+            </>
+          }
+        />
+      </motion.div>
+
+      <motion.div variants={riseIn}>
+        <StatGrid cols={4}>
+          <Stat
+            label="Inventory on hand"
+            value={formatCurrency(valuation)}
+            meta={`${formatNumber(units)} units · ${warehouses.length} facilities`}
+            icon={Boxes}
+          />
+          <Stat
+            label="Order execution"
+            value={formatPercentage(scorecard.order_execution_rate || 0)}
+            meta={`${formatNumber(metrics.active_orders || 0)} active orders`}
+            tone="good"
+            icon={TrendingUp}
+          />
+          <Stat
+            label="On-time delivery"
+            value={formatPercentage(scorecard.on_time_delivery_rate || 0)}
+            meta={`${formatNumber(metrics.delivered_shipments || 0)} shipments closed`}
+            icon={Truck}
+          />
+          <Stat
+            label="Open receivables"
+            value={formatCurrency(scorecard.outstanding_receivables || 0)}
+            meta={`${metrics.overdue_invoices || 0} overdue · ${metrics.customers_with_outstanding || 0} accounts`}
+            tone={Number(metrics.overdue_invoices) > 0 ? 'warn' : ''}
+            icon={CircleDollarSign}
+          />
+        </StatGrid>
+      </motion.div>
+
+      <div className="split split-aside">
+        {/* Order flow + recent demand */}
+        <motion.div variants={riseIn} style={{ display: 'grid', gap: 14, minWidth: 0 }}>
+          <Panel>
+            <PanelHead
+              title="Demand pipeline"
+              subtitle={`${formatNumber(pipelineTotal)} orders in tracked fulfilment stages`}
+              action={<button className="btn btn-ghost" onClick={() => navigate('/orders')}>Open orders <ArrowUpRight size={11} /></button>}
+            />
+            <PanelBody>
+              <div style={{ display: 'flex', height: 6, borderRadius: 99, overflow: 'hidden', gap: 2 }}>
+                {pipeline.map((p) => (
+                  <motion.div
+                    key={p.key}
+                    initial={{ width: 0 }}
+                    animate={{ width: `${(p.value / pipelineTotal) * 100}%` }}
+                    transition={{ duration: 0.7, ease: EASE, delay: 0.1 }}
+                    style={{ background: p.tone, minWidth: p.value ? 6 : 0 }}
+                  />
+                ))}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginTop: 14 }}>
+                {pipeline.map((p) => (
+                  <div key={p.key}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <span style={{ width: 5, height: 5, borderRadius: 1, background: p.tone }} />
+                      <span className="eyebrow" style={{ fontSize: 8 }}>{p.key}</span>
+                    </div>
+                    <div className="mono" style={{ fontSize: 16, marginTop: 3, color: 'var(--color-text-primary)' }}>
+                      {formatNumber(p.value)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ borderTop: '1px solid var(--color-border-subtle)', marginTop: 14 }}>
+                {orders.length === 0 && (
+                  <div style={{ padding: 18, fontSize: 10.5, color: 'var(--color-text-muted)' }}>No sales orders recorded.</div>
+                )}
+                {orders.slice(0, 5).map((o) => (
+                  <button
+                    key={o.sales_order_id || o.id}
+                    onClick={() => navigate('/orders')}
+                    style={{
+                      width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '9px 0', borderBottom: '1px solid var(--color-border-subtle)', textAlign: 'left'
+                    }}
+                  >
+                    <span className="mono" style={{ fontSize: 10, width: 106, color: 'var(--color-text-secondary)', flexShrink: 0 }}>
+                      {o.order_number || `#${o.sales_order_id}`}
+                    </span>
+                    <span className="truncate" style={{ flex: 1, fontSize: 11, color: 'var(--color-text-primary)' }}>
+                      {o.customer_name || o.customers?.name || 'Account'}
+                    </span>
+                    <span className="mono" style={{ fontSize: 10, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap' }}>
+                      {formatCurrency(o.total_amount || 0)}
+                    </span>
+                    <StatusBadge status={o.status} size="sm" />
+                  </button>
+                ))}
+              </div>
+            </PanelBody>
+          </Panel>
+
+          <Panel>
+            <PanelHead
+              title="Facility network"
+              subtitle="Stock position and occupied capacity by distribution centre"
+              action={<button className="btn btn-ghost" onClick={() => navigate('/warehouses')}>Facilities <ArrowUpRight size={11} /></button>}
+            />
+            <PanelBody flush>
+              <div style={{ overflowX: 'auto' }}>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Facility</th>
+                      <th style={{ textAlign: 'right' }}>Units</th>
+                      <th style={{ textAlign: 'right' }}>Value</th>
+                      <th style={{ width: 150 }}>Utilisation</th>
+                      <th style={{ textAlign: 'right' }}>Orders</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {warehouses.map((w) => {
+                      const u = utilization.find((x) => x.warehouse_id === w.warehouse_id);
+                      return (
+                        <tr key={w.warehouse_id}>
+                          <td>
+                            <div className="cell-strong">{w.warehouse_name}</div>
+                            <div className="cell-sub mono">{w.warehouse_code} · {w.city}</div>
+                          </td>
+                          <td className="num" style={{ textAlign: 'right' }}>{formatNumber(w.total_stock_units)}</td>
+                          <td className="num" style={{ textAlign: 'right' }}>{formatCurrency(w.inventory_value)}</td>
+                          <td>
+                            <Meter
+                              value={u?.utilization_percentage || 0}
+                              tone={(u?.utilization_percentage || 0) > 85 ? 'bad' : (u?.utilization_percentage || 0) > 65 ? 'warn' : 'good'}
+                            />
+                            <div className="mono" style={{ fontSize: 8.5, color: 'var(--color-text-muted)', marginTop: 3 }}>
+                              {formatPercentage(u?.utilization_percentage || 0)} occupied
+                            </div>
+                          </td>
+                          <td className="num" style={{ textAlign: 'right' }}>{formatNumber(w.active_orders)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </PanelBody>
+          </Panel>
+        </motion.div>
+
+        {/* Exceptions + dispatch + working capital */}
+        <motion.div variants={riseIn} style={{ display: 'grid', gap: 14, alignContent: 'start' }}>
+          <Panel>
+            <PanelHead title="Exceptions" subtitle="Threshold breaches requiring a decision" action={<Activity size={13} style={{ color: 'var(--color-text-muted)' }} />} />
+            <PanelBody style={{ display: 'grid', gap: 7 }}>
+              {riskRows.length === 0 && <div style={{ fontSize: 10.5, color: 'var(--color-text-muted)' }}>No risk records returned.</div>}
+              {riskRows.map((r) => {
+                const tone = r.risk_level === 'CRITICAL' ? 'danger' : r.risk_level === 'WARNING' ? 'warning' : 'neutral';
+                const labels = {
+                  PENDING_SALES_ORDERS: 'Orders awaiting confirmation',
+                  OPEN_CUSTOMER_RECEIVABLES: 'Accounts with balances',
+                  OVERDUE_INVOICES: 'Invoices past due',
+                  PARTIAL_PURCHASE_ORDERS: 'Partially received POs',
+                  LOW_STOCK: 'Locations below reorder'
+                };
+                return (
+                  <div key={r.risk_type} style={{
+                    display: 'flex', alignItems: 'center', gap: 9,
+                    padding: '8px 9px', border: '1px solid var(--color-border-subtle)', borderRadius: 4
+                  }}>
+                    <AlertTriangle size={12} style={{ color: `var(--color-${tone === 'neutral' ? 'text-muted' : tone + '-text'})` }} />
+                    <span style={{ flex: 1, fontSize: 10.5, color: 'var(--color-text-secondary)' }}>{labels[r.risk_type] || r.risk_type}</span>
+                    <span className="mono" style={{ fontSize: 12, color: 'var(--color-text-primary)' }}>{r.risk_count}</span>
+                    <span className={`badge badge-${tone === 'neutral' ? 'neutral' : tone}`}>{r.risk_level}</span>
+                  </div>
+                );
+              })}
+            </PanelBody>
+          </Panel>
+
+          <Panel>
+            <PanelHead title="Dispatch board" subtitle="Latest freight movements" action={<button className="btn btn-ghost" onClick={() => navigate('/shipments')}><Radio size={11} /> Track</button>} />
+            <PanelBody style={{ display: 'grid', gap: 0 }}>
+              {shipments.map((s) => (
+                <button
+                  key={s.shipment_id}
+                  onClick={() => navigate('/shipments')}
+                  style={{ textAlign: 'left', padding: '8px 0', borderBottom: '1px solid var(--color-border-subtle)' }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                    <span className="mono" style={{ fontSize: 10, color: 'var(--color-text-primary)' }}>{s.tracking_number}</span>
+                    <StatusBadge status={s.status} size="sm" />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3, gap: 8 }}>
+                    <span className="truncate" style={{ fontSize: 9.5, color: 'var(--color-text-muted)' }}>
+                      {s.destination_address}
+                    </span>
+                    <span className="mono" style={{ fontSize: 8.5, color: 'var(--color-text-dim)', whiteSpace: 'nowrap' }}>
+                      {s.carrier_name}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </PanelBody>
+          </Panel>
+
+          <Panel>
+            <PanelHead title="Working capital" subtitle="Invoiced value vs settled cash" />
+            <PanelBody style={{ display: 'grid', gap: 12 }}>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>Collected</span>
+                  <span className="mono" style={{ fontSize: 10, color: 'var(--color-success-text)' }}>{formatCurrency(metrics.total_paid_value || 0)}</span>
+                </div>
+                <Meter value={scorecard.total_invoiced_value ? (Number(metrics.total_paid_value) / Number(scorecard.total_invoiced_value)) * 100 : 0} tone="good" />
+              </div>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>Outstanding</span>
+                  <span className="mono" style={{ fontSize: 10, color: 'var(--color-warning-text)' }}>{formatCurrency(scorecard.outstanding_receivables || 0)}</span>
+                </div>
+                <Meter
+                  value={scorecard.total_invoiced_value ? (Number(scorecard.outstanding_receivables) / Number(scorecard.total_invoiced_value)) * 100 : 0}
+                  tone="warn"
+                />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <SmallFigure icon={Receipt} label="Invoiced" value={formatCurrency(scorecard.total_invoiced_value || 0)} onClick={() => navigate('/invoices')} />
+                <SmallFigure icon={RotateCcw} label="Open returns" value={formatNumber(metrics.open_returns || 0)} onClick={() => navigate('/returns')} />
+                <SmallFigure icon={ShoppingCart} label="Open POs" value={formatNumber(metrics.open_purchase_orders || 0)} onClick={() => navigate('/purchase-orders')} />
+                <SmallFigure icon={Warehouse} label="Suppliers" value={formatNumber(metrics.active_suppliers || 0)} onClick={() => navigate('/suppliers')} />
+              </div>
+            </PanelBody>
+          </Panel>
+        </motion.div>
+      </div>
+    </motion.div>
+  );
+}
+
+function SmallFigure({ icon: Icon, label, value, onClick }) {
+  return (
+    <button
+      onClick={onClick}
       style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--space-6)'
+        textAlign: 'left', border: '1px solid var(--color-border-subtle)', borderRadius: 4,
+        padding: '8px 9px', display: 'flex', flexDirection: 'column', gap: 4
       }}
     >
-      {/* Premium Redesigned Header Section */}
-      <motion.div variants={itemVariants}>
-        <div style={{
-          background: 'linear-gradient(135deg, var(--color-bg-elevated) 0%, var(--color-bg-card) 100%)',
-          borderRadius: 'var(--radius-2xl)',
-          padding: 'var(--space-8)',
-          border: '1px solid var(--color-border-default)',
-          boxShadow: 'var(--shadow-card)',
-          position: 'relative',
-          overflow: 'hidden'
-        }}>
-          {/* Decorative accent element */}
-          <div style={{
-            position: 'absolute',
-            top: '-40px',
-            right: '-40px',
-            width: '200px',
-            height: '200px',
-            background: 'radial-gradient(circle, rgba(59, 130, 246, 0.1) 0%, transparent 70%)',
-            borderRadius: '50%',
-            pointerEvents: 'none'
-          }} />
-
-          <div style={{ position: 'relative', zIndex: 1 }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 'var(--space-4)' }}>
-              <div>
-                <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.15em', color: 'var(--color-accent-blue)', marginBottom: 'var(--space-2)' }}>
-                  SUPPLY CHAIN COMMAND CENTER
-                </div>
-                <h1 style={{ fontSize: 'var(--font-size-5xl)', fontWeight: 800, color: 'var(--color-text-primary)', letterSpacing: '-0.02em', lineHeight: 1.1, marginBottom: 'var(--space-3)' }}>
-                  Enterprise Control Tower
-                </h1>
-                <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)', lineHeight: 1.6, maxWidth: '600px' }}>
-                  Real-time operational intelligence across global warehouse network, procurement pipeline, and multi-modal logistics
-                </p>
-              </div>
-              <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
-                <motion.button
-                  whileHover={{ scale: 1.05, y: -2 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={handleRefreshAll}
-                  style={{
-                    padding: '0.65rem 1.5rem',
-                    backgroundColor: 'rgba(59, 130, 246, 0.15)',
-                    border: '1px solid var(--color-accent-blue)',
-                    borderRadius: 'var(--radius-lg)',
-                    color: 'var(--color-accent-blue)',
-                    fontSize: 'var(--font-size-xs)',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    transition: 'all var(--transition-fast)'
-                  }}
-                >
-                  <RefreshCw size={16} />
-                  Refresh
-                </motion.button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </motion.div>
-
-      {/* Premium KPI Grid - Enhanced Cards */}
-      <motion.div
-        variants={itemVariants}
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-          gap: 'var(--space-5)',
-          marginBottom: 'var(--space-6)'
-        }}
-      >
-        {/* KPI Card 1: Total Valuation */}
-        <motion.div whileHover={{ y: -6, transition: { duration: 0.3 } }}>
-          <div style={{
-            background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(59, 130, 246, 0.05) 100%)',
-            border: '1px solid var(--color-accent-blue-subtle)',
-            borderRadius: 'var(--radius-xl)',
-            padding: 'var(--space-5)',
-            position: 'relative',
-            overflow: 'hidden',
-            boxShadow: '0 0 0 1px var(--color-border-subtle), 0 2px 8px rgba(59, 130, 246, 0.05)'
-          }}>
-            <div style={{ position: 'absolute', top: 0, right: 0, width: '120px', height: '120px', background: 'radial-gradient(circle, rgba(59, 130, 246, 0.15) 0%, transparent 70%)', borderRadius: '50%', transform: 'translate(40px, -40px)', pointerEvents: 'none' }} />
-            <div style={{ position: 'relative', zIndex: 1 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 'var(--space-4)' }}>
-                <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--color-text-muted)' }}>Total Valuation</span>
-                <DollarSign size={18} style={{ color: 'var(--color-accent-blue)' }} />
-              </div>
-              <div style={{ fontSize: 'var(--font-size-3xl)', fontWeight: 800, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)', letterSpacing: '-0.01em', marginBottom: 'var(--space-2)' }}>
-                {formatCurrency(scorecard.total_inventory_value || 0)}
-              </div>
-              <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>Across {formatNumber(scorecard.active_warehouses || 3)} active physical hubs</p>
-            </div>
-          </div>
-        </motion.div>
-
-        {/* KPI Card 2: Fulfillment Rate */}
-        <motion.div whileHover={{ y: -6, transition: { duration: 0.3 } }}>
-          <div style={{
-            background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(16, 185, 129, 0.05) 100%)',
-            border: '1px solid rgba(16, 185, 129, 0.2)',
-            borderRadius: 'var(--radius-xl)',
-            padding: 'var(--space-5)',
-            position: 'relative',
-            overflow: 'hidden',
-            boxShadow: '0 0 0 1px var(--color-border-subtle), 0 2px 8px rgba(16, 185, 129, 0.05)'
-          }}>
-            <div style={{ position: 'absolute', top: 0, right: 0, width: '120px', height: '120px', background: 'radial-gradient(circle, rgba(16, 185, 129, 0.15) 0%, transparent 70%)', borderRadius: '50%', transform: 'translate(40px, -40px)', pointerEvents: 'none' }} />
-            <div style={{ position: 'relative', zIndex: 1 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 'var(--space-4)' }}>
-                <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--color-text-muted)' }}>Fulfillment Rate</span>
-                <TrendingUp size={18} style={{ color: 'var(--color-success)' }} />
-              </div>
-              <div style={{ fontSize: 'var(--font-size-3xl)', fontWeight: 800, color: 'var(--color-success-text)', fontFamily: 'var(--font-mono)', letterSpacing: '-0.01em', marginBottom: 'var(--space-2)' }}>
-                {formatPercentage(scorecard.fulfillment_rate || 95)}
-              </div>
-              <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>Order dispatch velocity vs 95% target</p>
-            </div>
-          </div>
-        </motion.div>
-
-        {/* KPI Card 3: Stock Alerts */}
-        <motion.div whileHover={{ y: -6, transition: { duration: 0.3 } }}>
-          <div style={{
-            background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(239, 68, 68, 0.05) 100%)',
-            border: metrics.lowStockItemsCount > 0 ? '1px solid rgba(239, 68, 68, 0.2)' : '1px solid rgba(16, 185, 129, 0.2)',
-            borderRadius: 'var(--radius-xl)',
-            padding: 'var(--space-5)',
-            position: 'relative',
-            overflow: 'hidden',
-            boxShadow: '0 0 0 1px var(--color-border-subtle), 0 2px 8px rgba(239, 68, 68, 0.05)'
-          }}>
-            <div style={{ position: 'absolute', top: 0, right: 0, width: '120px', height: '120px', background: 'radial-gradient(circle, rgba(239, 68, 68, 0.15) 0%, transparent 70%)', borderRadius: '50%', transform: 'translate(40px, -40px)', pointerEvents: 'none' }} />
-            <div style={{ position: 'relative', zIndex: 1 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 'var(--space-4)' }}>
-                <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--color-text-muted)' }}>Stock Alerts</span>
-                <AlertTriangle size={18} style={{ color: metrics.lowStockItemsCount > 0 ? 'var(--color-danger)' : 'var(--color-success)' }} />
-              </div>
-              <div style={{ fontSize: 'var(--font-size-3xl)', fontWeight: 800, color: metrics.lowStockItemsCount > 0 ? 'var(--color-danger-text)' : 'var(--color-success-text)', fontFamily: 'var(--font-mono)', letterSpacing: '-0.01em', marginBottom: 'var(--space-2)' }}>
-                {formatNumber(metrics.lowStockItemsCount || 0)}
-              </div>
-              <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
-                {metrics.lowStockItemsCount > 0 ? 'Requires replenishment' : 'All optimal levels'}
-              </p>
-            </div>
-          </div>
-        </motion.div>
-
-        {/* KPI Card 4: Shipments In Transit */}
-        <motion.div whileHover={{ y: -6, transition: { duration: 0.3 } }}>
-          <div style={{
-            background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.1) 0%, rgba(6, 182, 212, 0.05) 100%)',
-            border: '1px solid rgba(6, 182, 212, 0.2)',
-            borderRadius: 'var(--radius-xl)',
-            padding: 'var(--space-5)',
-            position: 'relative',
-            overflow: 'hidden',
-            boxShadow: '0 0 0 1px var(--color-border-subtle), 0 2px 8px rgba(6, 182, 212, 0.05)'
-          }}>
-            <div style={{ position: 'absolute', top: 0, right: 0, width: '120px', height: '120px', background: 'radial-gradient(circle, rgba(6, 182, 212, 0.15) 0%, transparent 70%)', borderRadius: '50%', transform: 'translate(40px, -40px)', pointerEvents: 'none' }} />
-            <div style={{ position: 'relative', zIndex: 1 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 'var(--space-4)' }}>
-                <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--color-text-muted)' }}>In Transit</span>
-                <Truck size={18} style={{ color: 'var(--color-info)' }} />
-              </div>
-              <div style={{ fontSize: 'var(--font-size-3xl)', fontWeight: 800, color: 'var(--color-info-text)', fontFamily: 'var(--font-mono)', letterSpacing: '-0.01em', marginBottom: 'var(--space-2)' }}>
-                {formatNumber(metrics.inTransitShipmentsCount || 0)}
-              </div>
-              <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>Active multi-modal freight</p>
-            </div>
-          </div>
-        </motion.div>
-      </motion.div>
-
-      {/* Operational Metrics Row - Premium Tiles */}
-      <motion.div
-        variants={itemVariants}
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-          gap: 'var(--space-4)',
-          marginBottom: 'var(--space-6)'
-        }}
-      >
-        {/* Metric Tile 1 */}
-        <div style={{
-          padding: 'var(--space-4)',
-          background: 'var(--color-bg-card)',
-          border: '1px solid var(--color-border-default)',
-          borderRadius: 'var(--radius-lg)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 'var(--space-3)',
-          transition: 'all var(--transition-normal)',
-          cursor: 'pointer'
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.borderColor = 'var(--color-border-strong)';
-          e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
-          e.currentTarget.style.boxShadow = 'var(--shadow-card-hover)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.borderColor = 'var(--color-border-default)';
-          e.currentTarget.style.backgroundColor = 'var(--color-bg-card)';
-          e.currentTarget.style.boxShadow = 'none';
-        }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Catalog SKUs
-            </span>
-            <Boxes size={16} style={{ color: 'var(--color-text-secondary)', opacity: 0.7 }} />
-          </div>
-          <div style={{ fontSize: 'var(--font-size-2xl)', fontWeight: 800, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
-            {formatNumber(metrics.totalInventoryItems || 0)}
-          </div>
-        </div>
-
-        {/* Metric Tile 2 */}
-        <div style={{
-          padding: 'var(--space-4)',
-          background: 'var(--color-bg-card)',
-          border: '1px solid var(--color-border-default)',
-          borderRadius: 'var(--radius-lg)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 'var(--space-3)',
-          transition: 'all var(--transition-normal)',
-          cursor: 'pointer'
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.borderColor = 'var(--color-warning)';
-          e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
-          e.currentTarget.style.boxShadow = '0 0 0 1px var(--color-border-default), 0 0 12px rgba(245, 158, 11, 0.1)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.borderColor = 'var(--color-border-default)';
-          e.currentTarget.style.backgroundColor = 'var(--color-bg-card)';
-          e.currentTarget.style.boxShadow = 'none';
-        }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Pending Orders
-            </span>
-            <ShoppingCart size={16} style={{ color: 'var(--color-warning)', opacity: 0.8 }} />
-          </div>
-          <div style={{ fontSize: 'var(--font-size-2xl)', fontWeight: 800, color: 'var(--color-warning)', fontFamily: 'var(--font-mono)' }}>
-            {formatNumber(metrics.pendingOrdersCount || 0)}
-          </div>
-        </div>
-
-        {/* Metric Tile 3 */}
-        <div style={{
-          padding: 'var(--space-4)',
-          background: 'var(--color-bg-card)',
-          border: '1px solid var(--color-border-default)',
-          borderRadius: 'var(--radius-lg)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 'var(--space-3)',
-          transition: 'all var(--transition-normal)',
-          cursor: 'pointer'
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.borderColor = 'var(--color-purple)';
-          e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
-          e.currentTarget.style.boxShadow = '0 0 0 1px var(--color-border-default), 0 0 12px rgba(139, 92, 246, 0.1)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.borderColor = 'var(--color-border-default)';
-          e.currentTarget.style.backgroundColor = 'var(--color-bg-card)';
-          e.currentTarget.style.boxShadow = 'none';
-        }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Open POs
-            </span>
-            <FileSpreadsheet size={16} style={{ color: 'var(--color-purple-text)', opacity: 0.8 }} />
-          </div>
-          <div style={{ fontSize: 'var(--font-size-2xl)', fontWeight: 800, color: 'var(--color-purple-text)', fontFamily: 'var(--font-mono)' }}>
-            {formatNumber(scorecard.open_purchase_orders || 0)}
-          </div>
-        </div>
-
-        {/* Metric Tile 4 */}
-        <div style={{
-          padding: 'var(--space-4)',
-          background: 'var(--color-bg-card)',
-          border: '1px solid var(--color-border-default)',
-          borderRadius: 'var(--radius-lg)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 'var(--space-3)',
-          transition: 'all var(--transition-normal)',
-          cursor: 'pointer'
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.borderColor = 'var(--color-accent-blue)';
-          e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
-          e.currentTarget.style.boxShadow = '0 0 0 1px var(--color-border-default), 0 0 12px rgba(59, 130, 246, 0.1)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.borderColor = 'var(--color-border-default)';
-          e.currentTarget.style.backgroundColor = 'var(--color-bg-card)';
-          e.currentTarget.style.boxShadow = 'none';
-        }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Active Hubs
-            </span>
-            <Warehouse size={16} style={{ color: 'var(--color-info-text)', opacity: 0.8 }} />
-          </div>
-          <div style={{ fontSize: 'var(--font-size-2xl)', fontWeight: 800, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
-            {formatNumber(scorecard.active_warehouses || 3)}
-          </div>
-        </div>
-      </motion.div>
-
-      {/* Premium Analytics & Intelligence Grid */}
-      <motion.div
-        variants={itemVariants}
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))',
-          gap: 'var(--space-5)',
-          marginBottom: 'var(--space-6)'
-        }}
-      >
-        {/* Facility Valuation Chart - Premium Card */}
-        <div style={{
-          background: 'var(--color-bg-card)',
-          border: '1px solid var(--color-border-default)',
-          borderRadius: 'var(--radius-xl)',
-          padding: 'var(--space-6)',
-          boxShadow: 'var(--shadow-card)',
-          transition: 'all var(--transition-normal)',
-          cursor: 'pointer'
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.borderColor = 'var(--color-border-strong)';
-          e.currentTarget.style.boxShadow = 'var(--shadow-card-hover)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.borderColor = 'var(--color-border-default)';
-          e.currentTarget.style.boxShadow = 'var(--shadow-card)';
-        }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 'var(--space-5)', paddingBottom: 'var(--space-4)', borderBottom: '1px solid var(--color-border-subtle)' }}>
-            <div>
-              <h3 style={{ fontSize: 'var(--font-size-lg)', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: 'var(--space-1)' }}>Facility Inventory Valuation</h3>
-              <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>Real-time stock capital distribution across active warehouses</p>
-            </div>
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              onClick={() => navigate('/warehouses')}
-              style={{
-                padding: '0.5rem 1rem',
-                backgroundColor: 'transparent',
-                border: '1px solid var(--color-border-default)',
-                borderRadius: 'var(--radius-md)',
-                color: 'var(--color-text-secondary)',
-                fontSize: 'var(--font-size-xs)',
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                transition: 'all var(--transition-fast)'
-              }}
-            >
-              View Details <ArrowRight size={14} />
-            </motion.button>
-          </div>
-          <BarChart
-            data={whChartData}
-            labelKey="label"
-            valueKey="value"
-            valueFormatter={formatCurrency}
-            orientation="horizontal"
-            barColor="var(--color-accent-blue)"
-            highlightMax
-          />
-        </div>
-
-        {/* Warehouse Utilization - Premium Card */}
-        <div style={{
-          background: 'var(--color-bg-card)',
-          border: '1px solid var(--color-border-default)',
-          borderRadius: 'var(--radius-xl)',
-          padding: 'var(--space-6)',
-          boxShadow: 'var(--shadow-card)',
-          transition: 'all var(--transition-normal)',
-          cursor: 'pointer'
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.borderColor = 'var(--color-border-strong)';
-          e.currentTarget.style.boxShadow = 'var(--shadow-card-hover)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.borderColor = 'var(--color-border-default)';
-          e.currentTarget.style.boxShadow = 'var(--shadow-card)';
-        }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 'var(--space-5)', paddingBottom: 'var(--space-4)', borderBottom: '1px solid var(--color-border-subtle)' }}>
-            <div>
-              <h3 style={{ fontSize: 'var(--font-size-lg)', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: 'var(--space-1)' }}>Warehouse Capacity & Utilization</h3>
-              <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>Physical cubic and pallet space occupancy by facility</p>
-            </div>
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              onClick={() => navigate('/analytics')}
-              style={{
-                padding: '0.5rem 1rem',
-                backgroundColor: 'transparent',
-                border: '1px solid var(--color-border-default)',
-                borderRadius: 'var(--radius-md)',
-                color: 'var(--color-text-secondary)',
-                fontSize: 'var(--font-size-xs)',
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                transition: 'all var(--transition-fast)'
-              }}
-            >
-              Full Analytics <ArrowRight size={14} />
-            </motion.button>
-          </div>
-          {warehouseUtil.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-              {warehouseUtil.map((wh, idx) => (
-                <div key={idx}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-2)' }}>
-                    <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-                      {wh.warehouse_name || 'Warehouse'}
-                    </span>
-                    <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
-                      {formatNumber(wh.utilized_capacity || 0)} / {formatNumber(wh.total_capacity || 0)}
-                    </span>
-                  </div>
-                  <ProgressBar
-                    label=""
-                    value={Number(wh.utilization_rate) || 0}
-                    max={100}
-                    showValue={false}
-                    thresholds={{ warning: 75, danger: 90 }}
-                  />
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)' }}>
-              No capacity metrics recorded.
-            </div>
-          )}
-        </div>
-      </motion.div>
-
-      {/* Operational Activity Section - Premium Cards */}
-      <motion.div
-        variants={itemVariants}
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))',
-          gap: 'var(--space-5)'
-        }}
-      >
-        {/* Recent Orders */}
-        <div style={{
-          background: 'var(--color-bg-card)',
-          border: '1px solid var(--color-border-default)',
-          borderRadius: 'var(--radius-xl)',
-          padding: 'var(--space-6)',
-          boxShadow: 'var(--shadow-card)',
-          transition: 'all var(--transition-normal)',
-          cursor: 'pointer'
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.borderColor = 'var(--color-border-strong)';
-          e.currentTarget.style.boxShadow = 'var(--shadow-card-hover)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.borderColor = 'var(--color-border-default)';
-          e.currentTarget.style.boxShadow = 'var(--shadow-card)';
-        }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 'var(--space-5)', paddingBottom: 'var(--space-4)', borderBottom: '1px solid var(--color-border-subtle)' }}>
-            <div>
-              <h3 style={{ fontSize: 'var(--font-size-lg)', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: 'var(--space-1)' }}>Recent Sales Orders</h3>
-              <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>Latest client demands in the fulfillment pipeline</p>
-            </div>
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              onClick={() => navigate('/orders')}
-              style={{
-                padding: '0.5rem 1rem',
-                backgroundColor: 'transparent',
-                border: '1px solid var(--color-border-default)',
-                borderRadius: 'var(--radius-md)',
-                color: 'var(--color-text-secondary)',
-                fontSize: 'var(--font-size-xs)',
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                transition: 'all var(--transition-fast)'
-              }}
-            >
-              All Orders <ArrowRight size={14} />
-            </motion.button>
-          </div>
-          {recentOrders.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              {recentOrders.slice(0, 5).map((order) => (
-                <motion.div
-                  key={order.id}
-                  whileHover={{ x: 4 }}
-                  onClick={() => navigate('/orders')}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: 'var(--space-3) var(--space-4)',
-                    backgroundColor: 'var(--color-bg-secondary)',
-                    borderRadius: 'var(--radius-lg)',
-                    border: '1px solid var(--color-border-subtle)',
-                    cursor: 'pointer',
-                    transition: 'all var(--transition-fast)'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
-                    e.currentTarget.style.borderColor = 'var(--color-border-strong)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)';
-                    e.currentTarget.style.borderColor = 'var(--color-border-subtle)';
-                  }}
-                >
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', flex: 1 }}>
-                    <span style={{ fontWeight: 700, fontSize: 'var(--font-size-xs)', color: 'var(--color-text-primary)' }}>
-                      {order.order_number || `Order #${order.id?.slice(0, 8)}`}
-                    </span>
-                    <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
-                      {order.customers?.name || order.customer_name || 'Enterprise Account'} • {formatDate(order.created_at || order.order_date)}
-                    </span>
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-                    <span style={{ fontWeight: 700, fontSize: 'var(--font-size-xs)', color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>
-                      {formatCurrency(order.total_amount || 0)}
-                    </span>
-                    <StatusBadge status={order.status} />
-                  </div>
-                </motion.div>
-              ))}
-            </div>
-          ) : (
-            <div style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)' }}>
-              No recent sales orders recorded.
-            </div>
-          )}
-        </div>
-
-        {/* Low Stock Watchlist */}
-        <div style={{
-          background: 'var(--color-bg-card)',
-          border: '1px solid var(--color-border-default)',
-          borderRadius: 'var(--radius-xl)',
-          padding: 'var(--space-6)',
-          boxShadow: 'var(--shadow-card)',
-          transition: 'all var(--transition-normal)',
-          cursor: 'pointer'
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.borderColor = 'var(--color-border-strong)';
-          e.currentTarget.style.boxShadow = 'var(--shadow-card-hover)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.borderColor = 'var(--color-border-default)';
-          e.currentTarget.style.boxShadow = 'var(--shadow-card)';
-        }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 'var(--space-5)', paddingBottom: 'var(--space-4)', borderBottom: '1px solid var(--color-border-subtle)' }}>
-            <div>
-              <h3 style={{ fontSize: 'var(--font-size-lg)', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: 'var(--space-1)' }}>Stock Alert Watchlist</h3>
-              <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>Inventory items requiring replenishment</p>
-            </div>
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              onClick={() => navigate('/inventory')}
-              style={{
-                padding: '0.5rem 1rem',
-                backgroundColor: 'transparent',
-                border: '1px solid var(--color-border-default)',
-                borderRadius: 'var(--radius-md)',
-                color: 'var(--color-text-secondary)',
-                fontSize: 'var(--font-size-xs)',
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                transition: 'all var(--transition-fast)'
-              }}
-            >
-              Inventory <ArrowRight size={14} />
-            </motion.button>
-          </div>
-          {lowStockItems.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              {lowStockItems.slice(0, 5).map((item) => (
-                <motion.div
-                  key={item.id}
-                  whileHover={{ x: 4 }}
-                  onClick={() => navigate('/inventory')}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: 'var(--space-3) var(--space-4)',
-                    backgroundColor: 'var(--color-bg-secondary)',
-                    borderRadius: 'var(--radius-lg)',
-                    border: '1px solid var(--color-border-subtle)',
-                    cursor: 'pointer',
-                    transition: 'all var(--transition-fast)'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
-                    e.currentTarget.style.borderColor = 'var(--color-danger-border)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)';
-                    e.currentTarget.style.borderColor = 'var(--color-border-subtle)';
-                  }}
-                >
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', flex: 1 }}>
-                    <span style={{ fontWeight: 700, fontSize: 'var(--font-size-xs)', color: 'var(--color-text-primary)' }}>
-                      {item.products?.name || item.product_name || `SKU #${item.id?.slice(0, 8)}`}
-                    </span>
-                    <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
-                      Hub: {item.warehouses?.name || item.warehouse_name || 'Central Facility'} • {item.quantity_available !== undefined ? item.quantity_available : item.quantity_on_hand || 0} units
-                    </span>
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-                    <motion.button
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      variant="outline"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate('/purchase-orders');
-                      }}
-                      style={{
-                        padding: '0.4rem 0.8rem',
-                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                        border: '1px solid rgba(239, 68, 68, 0.3)',
-                        borderRadius: 'var(--radius-md)',
-                        color: 'var(--color-danger-text)',
-                        fontSize: '10px',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        transition: 'all var(--transition-fast)'
-                      }}
-                    >
-                      Reorder
-                    </motion.button>
-                  </div>
-                </motion.div>
-              ))}
-            </div>
-          ) : (
-            <div style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--color-success-text)', fontSize: 'var(--font-size-xs)' }}>
-              ✓ All inventory items are above safe operational thresholds.
-            </div>
-          )}
-        </div>
-      </motion.div>
-    </motion.div>
+      <span className="eyebrow" style={{ fontSize: 8, display: 'flex', alignItems: 'center', gap: 4 }}>
+        <Icon size={9} /> {label}
+      </span>
+      <span className="mono" style={{ fontSize: 12, color: 'var(--color-text-primary)' }}>{value}</span>
+    </button>
   );
 }
 

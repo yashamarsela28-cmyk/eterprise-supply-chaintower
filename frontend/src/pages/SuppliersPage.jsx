@@ -1,272 +1,209 @@
-import React, { useState, useMemo } from 'react';
-import { Building2, RefreshCw, Mail, Phone, Star } from 'lucide-react';
-import { useApiQuery } from '../hooks/useApiQuery';
-import { usePagination } from '../hooks/usePagination';
+import React, { useEffect, useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
+import { RefreshCw, Search, X, Building2, Star, TrendingUp } from 'lucide-react';
 import * as supplierService from '../services/supplierService';
-import { normalizeList, normalizePagination } from '../utils/responseNormalizer';
+import { getPurchaseOrderPerformance } from '../services/analyticsService';
+import { normalizeList } from '../utils/responseNormalizer';
 import { PageHeader } from '../components/common/PageHeader';
-import { FilterBar } from '../components/common/FilterBar';
-import { Table } from '../components/common/Table';
-import { Pagination } from '../components/common/Pagination';
-import { Select } from '../components/common/Select';
-import { Button } from '../components/common/Button';
-import { Drawer } from '../components/common/Drawer';
+import { Panel, PanelHead, PanelBody, Stat, StatGrid, Meter } from '../components/common/Panel';
 import { StatusBadge } from '../components/common/StatusBadge';
-import { formatNumber } from '../utils/formatters';
+import { formatCurrency, formatNumber, formatPercentage } from '../utils/formatters';
+import { pageStagger, riseIn } from '../utils/motion';
 
 export function SuppliersPage() {
+  const [suppliers, setSuppliers] = useState([]);
+  const [purchaseOrders, setPurchaseOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [selectedSupplier, setSelectedSupplier] = useState(null);
+  const [selected, setSelected] = useState(null);
 
-  const { page, limit, setPage, setLimit } = usePagination(1, 20);
+  const load = () => {
+    setLoading(true); setError(null);
+    Promise.all([supplierService.getSuppliers({ limit: 200 }), getPurchaseOrderPerformance()])
+      .then(([s, po]) => {
+        setSuppliers(normalizeList(s));
+        setPurchaseOrders(normalizeList(po));
+        setLoading(false);
+      })
+      .catch((e) => { setError(e?.message || 'Supplier service unavailable.'); setLoading(false); });
+  };
+  useEffect(load, []);
 
-  const { data: rawData, loading, error, refetch } = useApiQuery(
-    supplierService.getSuppliers,
-    { page, limit, search, status: statusFilter },
-    { immediate: true }
-  );
-
-  const suppliers = useMemo(() => normalizeList(rawData), [rawData]);
-  const pagination = useMemo(() => normalizePagination(rawData, suppliers, page, limit), [rawData, suppliers, page, limit]);
-
-  const summaryStats = useMemo(() => {
-    let activeVendors = 0;
-    let totalRating = 0;
-
-    suppliers.forEach((s) => {
-      if (s.status === 'active' || s.is_active !== false) activeVendors += 1;
-      totalRating += Number(s.rating || s.quality_rating || 4.8);
+  // Aggregate from the purchase-order ledger. The supplier KPI view fans out across
+  // PO lines and overstates committed spend, so it is not used for money figures.
+  const poBySupplier = useMemo(() => {
+    const map = new Map();
+    purchaseOrders.forEach((p) => {
+      const key = p.supplier_name;
+      const cur = map.get(key) || { count: 0, spend: 0, completed: 0, ordered: 0, received: 0 };
+      cur.count += 1;
+      cur.spend += Number(p.total_amount || 0);
+      if (p.status === 'RECEIVED') cur.completed += 1;
+      cur.ordered += Number(p.ordered_units || 0);
+      cur.received += Number(p.received_units || 0);
+      map.set(key, cur);
     });
+    return map;
+  }, [purchaseOrders]);
 
+  const merged = useMemo(() => suppliers.map((s) => {
+    const po = poBySupplier.get(s.supplier_name) || { count: 0, spend: 0, completed: 0, ordered: 0, received: 0 };
     return {
-      total: pagination.total || suppliers.length,
-      active: activeVendors,
-      avgRating: suppliers.length > 0 ? (totalRating / suppliers.length).toFixed(1) : '5.0'
+      ...s,
+      po_count: po.count,
+      po_spend: po.spend,
+      po_completed: po.completed,
+      po_receipt_rate: po.ordered ? (po.received / po.ordered) * 100 : 0,
+      completion_rate: po.count ? (po.completed / po.count) * 100 : 0
     };
-  }, [suppliers, pagination.total]);
+  }), [suppliers, poBySupplier]);
 
-  const columns = [
-    {
-      key: 'name',
-      header: 'Supplier Organization',
-      render: (r) => (
-        <div>
-          <div style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>{r.name}</div>
-          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '0.15rem' }}>
-            Code: <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-secondary)' }}>{r.code || 'N/A'}</span>
-            {' • '}
-            <span>Contact: {r.contact_name || 'Primary'}</span>
-          </div>
-        </div>
-      )
-    },
-    {
-      key: 'email',
-      header: 'Contact Info',
-      render: (r) => (
-        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
-          {r.email && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-              <Mail size={11} style={{ opacity: 0.7 }} /> {r.email}
-            </div>
-          )}
-          {r.phone && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '2px' }}>
-              <Phone size={11} style={{ opacity: 0.7 }} /> {r.phone}
-            </div>
-          )}
-        </div>
-      )
-    },
-    {
-      key: 'payment_terms',
-      header: 'Payment Terms',
-      render: (r) => <span style={{ color: 'var(--color-text-secondary)' }}>{r.payment_terms || 'Net 30'}</span>
-    },
-    {
-      key: 'rating',
-      header: 'Reliability Rating',
-      render: (r) => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', color: 'var(--color-warning-text)' }}>
-          <Star size={13} fill="currentColor" />
-          <span style={{ fontWeight: 600, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-xs)' }}>
-            {r.rating || r.quality_rating || 4.8}
-          </span>
-        </div>
-      )
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      render: (r) => <StatusBadge status={r.status || (r.is_active !== false ? 'active' : 'inactive')} size="sm" />
-    }
-  ];
+  const filtered = useMemo(() => merged.filter((s) => {
+    const q = search.trim().toLowerCase();
+    return !q || [s.supplier_name, s.supplier_code, s.city, s.contact_person].some((v) => String(v || '').toLowerCase().includes(q));
+  }), [merged, search]);
+
+  const stats = useMemo(() => filtered.reduce((a, s) => {
+    a.spend += Number(s.po_spend || 0);
+    a.orders += Number(s.po_count || 0);
+    if (s.status === 'ACTIVE') a.active += 1;
+    a.rating += Number(s.supplier_rating || 0);
+    return a;
+  }, { spend: 0, orders: 0, active: 0, rating: 0 }), [filtered]);
+
+  const ranked = useMemo(() => [...filtered].sort((a, b) => Number(b.po_spend || 0) - Number(a.po_spend || 0)).slice(0, 5), [filtered]);
 
   return (
-    <div className="suppliers-page animate-fade-in">
-      <PageHeader
-        eyebrow="PROCUREMENT // VENDORS"
-        title="Suppliers & Vendor Directory"
-        description="Vendor partner master profiles, reliability ratings, lead-time commitments, and commercial payment terms."
-        actions={
-          <Button
-            variant="outline"
-            size="sm"
-            icon={RefreshCw}
-            onClick={refetch}
-          >
-            Refresh Directory
-          </Button>
-        }
-      />
-
-      {/* KPI Summary Strip */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: 'var(--space-3)',
-          marginBottom: 'var(--space-5)'
-        }}
-      >
-        <div
-          style={{
-            padding: '0.85rem 1.15rem',
-            backgroundColor: 'var(--color-bg-card)',
-            border: '1px solid var(--color-border-default)',
-            borderRadius: 'var(--radius-lg)'
-          }}
-        >
-          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Registered Suppliers
-          </span>
-          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
-            {formatNumber(summaryStats.total)}
-          </div>
-        </div>
-
-        <div
-          style={{
-            padding: '0.85rem 1.15rem',
-            backgroundColor: 'var(--color-bg-card)',
-            border: '1px solid var(--color-border-default)',
-            borderRadius: 'var(--radius-lg)'
-          }}
-        >
-          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Active Vendor Accounts
-          </span>
-          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-success-text)', fontFamily: 'var(--font-mono)' }}>
-            {formatNumber(summaryStats.active)}
-          </div>
-        </div>
-
-        <div
-          style={{
-            padding: '0.85rem 1.15rem',
-            backgroundColor: 'var(--color-bg-card)',
-            border: '1px solid var(--color-border-default)',
-            borderRadius: 'var(--radius-lg)'
-          }}
-        >
-          <span style={{ fontSize: '10.5px', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Average Reliability Score
-          </span>
-          <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
-            {summaryStats.avgRating} / 5.0
-          </div>
-        </div>
-      </div>
-
-      <FilterBar
-        search={search}
-        onSearchChange={(val) => {
-          setSearch(val);
-          setPage(1);
-        }}
-        searchPlaceholder="Filter by supplier name, code, contact or email..."
-        hasActiveFilters={Boolean(search || statusFilter)}
-        onReset={() => {
-          setSearch('');
-          setStatusFilter('');
-          setPage(1);
-        }}
-      >
-        <Select
-          value={statusFilter}
-          onChange={(e) => {
-            setStatusFilter(e.target.value);
-            setPage(1);
-          }}
-          options={[
-            { value: '', label: 'All Statuses' },
-            { value: 'active', label: 'Active' },
-            { value: 'inactive', label: 'Inactive' }
-          ]}
+    <motion.div className="page" variants={pageStagger} initial="hidden" animate="visible">
+      <motion.div variants={riseIn}>
+        <PageHeader
+          eyebrow="PROCUREMENT / VENDOR NETWORK"
+          title="Suppliers"
+          description="Vendor reliability, committed spend and completion performance across the inbound network."
+          actions={<button className="btn btn-outline" onClick={load}><RefreshCw size={11} className={loading ? 'animate-spin' : ''} /> Refresh</button>}
         />
-      </FilterBar>
+      </motion.div>
 
-      <Table
-        columns={columns}
-        data={suppliers}
-        loading={loading}
-        onRowClick={(s) => setSelectedSupplier(s)}
-        emptyTitle="No Suppliers Found"
-        emptyMessage="No supplier records matched your filter criteria."
-      />
+      <motion.div variants={riseIn}>
+        <StatGrid cols={4}>
+          <Stat label="Suppliers" value={formatNumber(filtered.length)} meta={`${formatNumber(suppliers.length)} on record`} icon={Building2} />
+          <Stat label="Active" value={formatNumber(stats.active)} meta="Trading relationships" tone="good" />
+          <Stat label="Committed spend" value={formatCurrency(stats.spend)} meta={`${formatNumber(stats.orders)} purchase orders`} />
+          <Stat label="Average rating" value={filtered.length ? (stats.rating / filtered.length).toFixed(2) : '—'} meta="Out of 5.00" icon={Star} />
+        </StatGrid>
+      </motion.div>
 
-      <Pagination
-        currentPage={page}
-        totalPages={pagination.totalPages || 1}
-        totalItems={pagination.total || suppliers.length}
-        limit={limit}
-        onPageChange={setPage}
-        onLimitChange={setLimit}
-      />
-
-      <Drawer
-        isOpen={Boolean(selectedSupplier)}
-        onClose={() => setSelectedSupplier(null)}
-        title={selectedSupplier?.name || 'Supplier Details'}
-        subtitle={`Supplier Code: ${selectedSupplier?.code || 'N/A'}`}
-      >
-        {selectedSupplier && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-            <div style={{ padding: '0.85rem 1rem', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
-              <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Primary Contact</div>
-              <div style={{ fontWeight: 600, color: 'var(--color-text-primary)', marginTop: '0.2rem', fontSize: 'var(--font-size-xs)' }}>
-                {selectedSupplier.contact_name || 'Accounts Representative'}
-              </div>
-              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)', marginTop: '0.2rem' }}>
-                {selectedSupplier.email} • {selectedSupplier.phone}
-              </div>
+      <div className="split split-aside">
+        <motion.div variants={riseIn} style={{ minWidth: 0 }}>
+          <Panel>
+            <div className="toolbar">
+              <label className="search-field">
+                <Search size={12} />
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Supplier, code, city or contact…" />
+                {search && <button onClick={() => setSearch('')}><X size={11} /></button>}
+              </label>
+              <span className="mono" style={{ fontSize: 9.5, color: 'var(--color-text-muted)' }}>{filtered.length} VENDORS</span>
             </div>
 
-            <div style={{ padding: '0.85rem 1rem', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-subtle)' }}>
-              <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Billing Address</div>
-              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-primary)', marginTop: '0.2rem' }}>
-                {selectedSupplier.address || 'Address on record'}
+            {error ? (
+              <div style={{ padding: 30, textAlign: 'center', color: 'var(--color-danger-text)', fontSize: 11 }}>{error}</div>
+            ) : (
+              <div className="table-scroll tall">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Supplier</th>
+                      <th>Location</th>
+                      <th>Contact</th>
+                      <th style={{ textAlign: 'right' }}>POs</th>
+                      <th style={{ width: 120 }}>Completion</th>
+                      <th style={{ textAlign: 'right' }}>Spend</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loading && Array.from({ length: 6 }).map((_, i) => (
+                      <tr key={i}>{Array.from({ length: 7 }).map((__, j) => <td key={j}><div className="skeleton" style={{ height: 9 }} /></td>)}</tr>
+                    ))}
+                    {!loading && filtered.map((s) => (
+                      <tr key={s.supplier_id} className="clickable" onClick={() => setSelected(s)}>
+                        <td>
+                          <div className="cell-strong">{s.supplier_name}</div>
+                          <div className="cell-sub mono">{s.supplier_code} · ★ {Number(s.supplier_rating || 0).toFixed(1)}</div>
+                        </td>
+                        <td>{s.city}{s.state ? `, ${s.state}` : ''}</td>
+                        <td>
+                          <div style={{ fontSize: 10.5 }}>{s.contact_person || '—'}</div>
+                          <div className="cell-sub">{s.email}</div>
+                        </td>
+                        <td className="mono" style={{ textAlign: 'right' }}>{formatNumber(s.po_count)}</td>
+                        <td>
+                          <Meter value={s.completion_rate} tone={s.completion_rate > 70 ? 'good' : 'warn'} />
+                          <div className="mono" style={{ fontSize: 8, color: 'var(--color-text-muted)', marginTop: 3 }}>{formatPercentage(s.completion_rate)}</div>
+                        </td>
+                        <td className="num" style={{ textAlign: 'right' }}>{formatCurrency(s.po_spend)}</td>
+                        <td><StatusBadge status={s.status || 'ACTIVE'} size="sm" /></td>
+                      </tr>
+                    ))}
+                    {!loading && filtered.length === 0 && (
+                      <tr><td colSpan={7} style={{ padding: 40, textAlign: 'center', color: 'var(--color-text-muted)' }}>No suppliers match this search.</td></tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
-            </div>
+            )}
+          </Panel>
+        </motion.div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
-              <div style={{ padding: '0.75rem', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border-subtle)' }}>
-                <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: 600 }}>Payment Terms</div>
-                <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text-primary)', marginTop: '0.15rem' }}>
-                  {selectedSupplier.payment_terms || 'Net 30'}
+        <motion.div variants={riseIn} style={{ display: 'grid', gap: 14, alignContent: 'start' }}>
+          <Panel>
+            <PanelHead title="Spend concentration" subtitle="Top vendors by committed value" action={<TrendingUp size={12} style={{ color: 'var(--color-text-muted)' }} />} />
+            <PanelBody style={{ display: 'grid', gap: 11 }}>
+              {ranked.map((s) => (
+                <button key={s.supplier_id} onClick={() => setSelected(s)} style={{ textAlign: 'left' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, gap: 8 }}>
+                    <span className="truncate" style={{ fontSize: 10.5, color: 'var(--color-text-secondary)' }}>{s.supplier_name}</span>
+                    <span className="mono" style={{ fontSize: 9.5, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>{formatCurrency(s.po_spend)}</span>
+                  </div>
+                  <Meter value={stats.spend ? (Number(s.po_spend) / stats.spend) * 100 : 0} />
+                </button>
+              ))}
+              {ranked.length === 0 && !loading && <div style={{ fontSize: 10.5, color: 'var(--color-text-muted)' }}>No supplier spend recorded.</div>}
+            </PanelBody>
+          </Panel>
+
+          <Panel>
+            <PanelHead title="Vendor inspector" subtitle={selected ? selected.supplier_name : 'Select a supplier'} />
+            <PanelBody>
+              {!selected ? (
+                <div style={{ fontSize: 10.5, color: 'var(--color-text-muted)', lineHeight: 1.6 }}>Select a supplier to inspect contact details and fulfilment performance.</div>
+              ) : (
+                <div style={{ display: 'grid', gap: 8 }}>
+                  <Row label="Code" value={selected.supplier_code} />
+                  <Row label="Contact" value={selected.contact_person} />
+                  <Row label="Email" value={selected.email} />
+                  <Row label="Phone" value={selected.phone} />
+                  <Row label="Location" value={`${selected.city}, ${selected.country}`} />
+                  <Row label="Rating" value={`${Number(selected.supplier_rating || 0).toFixed(1)} / 5.0`} />
+                  <Row label="Orders" value={`${selected.po_completed} completed of ${selected.po_count}`} />
+                  <Row label="Spend" value={formatCurrency(selected.po_spend)} />
+                  <Row label="Units received" value={formatPercentage(selected.po_receipt_rate)} />
                 </div>
-              </div>
-              <div style={{ padding: '0.75rem', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border-subtle)' }}>
-                <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: 600 }}>Status</div>
-                <div style={{ marginTop: '0.2rem' }}>
-                  <StatusBadge status={selectedSupplier.status || 'active'} size="sm" />
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </Drawer>
+              )}
+            </PanelBody>
+          </Panel>
+        </motion.div>
+      </div>
+    </motion.div>
+  );
+}
+
+function Row({ label, value }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, paddingBottom: 6, borderBottom: '1px solid var(--color-border-subtle)' }}>
+      <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>{label}</span>
+      <span style={{ fontSize: 10.5, textAlign: 'right' }}>{value || '—'}</span>
     </div>
   );
 }
